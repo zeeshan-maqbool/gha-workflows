@@ -1,0 +1,30 @@
+name: ChatOps
+
+on:
+  issue_comment:
+  workflow_call:
+    inputs:
+      RUNS_ON:
+        required: true
+        type: string
+    outputs:
+      pr_trigger:
+        value: ${{ jobs.chatops.outputs.chatops_output }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  chatops:
+    runs-on: ${{ inputs.RUNS_ON }}
+    steps:
+      - name: listen for PR Comments
+        uses: machine-learning-apps/actions-chatops@master
+        with:
+          TRIGGER_PHRASE: "/deploy"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        id: pr_trigger
+    outputs:
+      chatops_output: ${{ steps.pr_trigger.outputs.TRAILING_LINE }}
