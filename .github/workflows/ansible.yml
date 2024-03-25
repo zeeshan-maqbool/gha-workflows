@@ -62,8 +62,16 @@ jobs:
         env:
           VARS: ${{ inputs.VARS }}
 
+      - name: Get Ansible vault password
+        if: ${{ inputs.PLAYBOOK != '' }}
+        uses: say8425/aws-secrets-manager-actions@v2.2.1
+        with:
+          SECRET_NAME: ansible-vault-password
+          AWS_DEFAULT_REGION: eu-west-1
+          OUTPUT_PATH: .env
+
       - name: Run playbook
-        if: ${{ inputs.DEPLOY_FILE == '' }}
+        if: ${{ inputs.PLAYBOOK != '' }}
         uses: dawidd6/action-ansible-playbook@v2
         with:
           playbook: ${{ inputs.PLAYBOOK }}
