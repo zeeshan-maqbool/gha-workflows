@@ -1,6 +1,2 @@
 # Default owners for this repo.
-* @getsmarter/execed-devops
-
-# Each line is a file pattern followed by one or more owners.
-*.sh @HeinrichL93
-roles/rapid7/ @Nova-ZA
+* @getsmarter/global-sre

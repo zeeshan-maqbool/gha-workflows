@@ -1,57 +1,41 @@
-name: Run Ansible action
+name: Run Deploy File
 
 on:
   workflow_call:
     inputs:
-      playbook:
+      RUNS_ON:
         required: true
         type: string
+      AWS_ROLE:
+        required: true
+        type: string
+      AWS_REGION:
+        required: true
+        type: string
+      SYSTEM_ENVIRONMENT:
+        required: true
+        type: string
+      DEPLOY_FILE:
+        required: false
+        type: string
+      VARS:
+        required: false
+        type: string
+      PLAYBOOK:
+        required: false
+        type: string
+      VERBOSE:
+        required: false
+        type: string
+
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  login-to-amazon-ecr:
-    runs-on: ubuntu-latest
+  run_ansible:
+    runs-on: ${{ inputs.RUNS_ON }}
     steps:
-      - name: Git clone the repository
-        uses: actions/checkout@v4.1.0
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::889132874985:role/github-provider-production
-          aws-region: eu-west-1
-          mask-aws-account-id: false
-        id: aws_login
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-        with:
-          mask-password: 'false'
-    outputs:
-      ecr_username: ${{ steps.login-ecr.outputs.docker_username_889132874985_dkr_ecr_eu_west_1_amazonaws_com }}
-      ecr_password: ${{ steps.login-ecr.outputs.docker_password_889132874985_dkr_ecr_eu_west_1_amazonaws_com }}
-      registry: ${{ steps.login-ecr.outputs.registry }}
-
-  run_staging:
-    runs-on: actions-runners-staging
-    needs: login-to-amazon-ecr
-    container:
-      image: ${{ needs.login-to-amazon-ecr.outputs.registry }}/deployer:main
-      credentials:
-        username: ${{ needs.login-to-amazon-ecr.outputs.ecr_username }}
-        password: ${{ needs.login-to-amazon-ecr.outputs.ecr_password }}
-    steps:
-      - name: Git clone the repository
-        uses: actions/checkout@v4.1.0
-      - name: Run Ansible
-        uses: ./.github/actions/run_env
-        with:
-          AWS_ROLE: arn:aws:iam::417728287678:role/github-provider-staging
-          ECR_ENDPOINT: ${{ needs.login-to-amazon-ecr.outputs.registry }}
-          CLUSTER_NAME: forge-staging
-          SYSTEM_ENVIRONMENT: staging
-
       - name: Install Dependencies
         shell: bash
         run: |
@@ -60,39 +44,39 @@ jobs:
           curl -sS https://webi.sh/node | sh
           echo ~/.local/opt/node/bin >> $GITHUB_PATH
 
+      - name: Git clone the repository
+        uses: actions/checkout@v4.1.0
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.0.1
         with:
-          role-to-assume: '${{ inputs.AWS_ROLE }}'
-          aws-region: eu-west-1
+          role-to-assume: ${{ inputs.AWS_ROLE }}
+          aws-region: ${{ inputs.AWS_REGION }}
           mask-aws-account-id: false
         id: aws_login
 
-      - name: Store ENV from AWS SecretManager
+      - name: Run Ansible Deploy Script
+        if: ${{ inputs.DEPLOY_FILE != '' }}
+        shell: bash
+        run: ${{ inputs.DEPLOY_FILE }}
+        env:
+          VARS: ${{ inputs.VARS }}
+
+      - name: Get Ansible vault password
+        if: ${{ inputs.PLAYBOOK != '' }}
         uses: say8425/aws-secrets-manager-actions@v2.2.1
         with:
-          SECRET_NAME: github-actions-secrets
+          SECRET_NAME: ansible-vault-password
           AWS_DEFAULT_REGION: eu-west-1
           OUTPUT_PATH: .env
 
-      - name: Store ENV from AWS SecretManager
-        uses: say8425/aws-secrets-manager-actions@v2.2.1
+      - name: Run playbook
+        if: ${{ inputs.PLAYBOOK != '' }}
+        uses: dawidd6/action-ansible-playbook@v2
         with:
-          SECRET_NAME: kubernetes-backups-aws-key-${SYSTEM_ENVIRONMENT}"
-          AWS_DEFAULT_REGION: eu-west-1
-          OUTPUT_PATH: .env
-
-      - name: Retrieve Buildkite SSH key'
-        run: |
-          mkdir ~/.ssh
-          aws secretsmanager get-secret-value --secret-id buildkite-agent-ssh-keys --region eu-west-1 --query SecretString --output text | jq -r .buildkite_pem | sed 's/\\n/\n/g'> ~/.ssh/id_rsa_bk
-          chmod 600 ~/.ssh/id_rsa_bk
-
-      # - name: Run playbook
-      #   uses: dawidd6/action-ansible-playbook@v2
-      #   with:
-      #     playbook: tools.yml
-      #     directory: ./
-      #     vault_password: ${{env.ANSIBLE_VAULT_PASSWORD}}
-      #     options: |
-      #       --extra-vars "cluster_name=forge-${{ inputs.environment }} aws_region=eu-west-1 system_environment=${{ inputs.environment }}"
+          playbook: ${{ inputs.PLAYBOOK }}
+          directory: ./
+          vault_password: ${{env.ANSIBLE_VAULT_PASSWORD}}
+          options: |
+            --extra-vars "${{ inputs.VARS }}"
+            "${{ inputs.VERBOSE }}"
