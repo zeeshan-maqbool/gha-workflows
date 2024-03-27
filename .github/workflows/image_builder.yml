@@ -1,0 +1,112 @@
+name: Image builder
+
+on:
+  workflow_call:
+    inputs:
+      RUNS_ON:
+        required: true
+        type: string
+      AWS_ROLE:
+        required: true
+        type: string
+      AWS_REGION:
+        required: true
+        type: string
+      REPO_NAME:
+        required: true
+        type: string
+      IMAGE_FILE:
+        required: false
+        type: string
+        default: Dockerfile
+      IMAGE_TAG:
+        required: true
+        type: string
+      PLATFORMS:
+        required: true
+        type: string
+      PUSH_IMAGE:
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_and_push:
+    runs-on: ${{inputs.RUNS_ON}}
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v3
+
+      - name: Set ARCH env
+        shell: bash
+        run: echo "OS_ARCH=$(docker version --format '{{.Client.Os}}/{{.Client.Arch}}')" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          role-to-assume: ${{ inputs.AWS_ROLE }}
+          aws-region: ${{inputs.AWS_REGION}}
+          mask-aws-account-id: false
+
+      - name: Login to Amazon ECR Private
+        uses: aws-actions/amazon-ecr-login@v2.0.1
+        id: login-ecr
+
+      - name: Create ECR repository if not exist
+        uses: int128/create-ecr-repository-action@v1.248.0
+        id: ecr_repo
+        with:
+          repository: ${{ inputs.REPO_NAME }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.1.0
+
+      - name: Build docker image
+        uses: docker/build-push-action@v5.2.0
+        with:
+          context: .
+          file: ${{ inputs.IMAGE_FILE }}
+          push: true
+          tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
+          platforms: ${{ inputs.PLATFORMS }}
+          cache-to: type=gha
+          cache-from: type=gha
+
+      - name: Load image for scanning
+        uses: docker/build-push-action@v5.2.0
+        with:
+          context: .
+          file: ${{ inputs.IMAGE_FILE }}
+          load: true
+          tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
+          platforms: ${{ env.OS_ARCH }}
+          cache-from: type=gha
+
+      - name: Vulnerability Scan
+        uses: aquasecurity/trivy-action@0.18.0
+        with:
+          image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
+          scan-type: 'image'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          scanners: 'vuln'
+          severity: 'CRITICAL'
+          exit-code: '1'
+
+      - name: Push Docker Image
+        if: ${{ inputs.PUSH_IMAGE }}
+        uses: docker/build-push-action@v5.2.0
+        with:
+          context: .
+          file: ${{ inputs.IMAGE_FILE }}
+          push: true
+          tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
+          platforms: ${{ inputs.PLATFORMS }}
+          cache-from: type=gha
