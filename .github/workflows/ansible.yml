@@ -12,9 +12,6 @@ on:
       AWS_REGION:
         required: true
         type: string
-      SYSTEM_ENVIRONMENT:
-        required: true
-        type: string
       DEPLOY_FILE:
         required: false
         type: string

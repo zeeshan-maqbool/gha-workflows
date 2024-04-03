@@ -1,5 +1,5 @@
 Finishes [GSRE-](https://2u-internal.atlassian.net/browse/GSRE-)
-Branch Merge Order: -> development -> master
+Branch Merge Order: -> main
 
 Changes:
 -
