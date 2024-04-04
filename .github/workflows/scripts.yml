@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 jobs:
-  run_ansible:
+  run_script:
     runs-on: ${{ inputs.RUNS_ON }}
     steps:
       - name: Git clone the repository
