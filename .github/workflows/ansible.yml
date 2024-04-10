@@ -18,6 +18,9 @@ on:
       VARS:
         required: false
         type: string
+      ANSIBLE_VARS:
+        required: false
+        type: string
       PLAYBOOK:
         required: false
         type: string
@@ -33,11 +36,9 @@ jobs:
   run_ansible:
     runs-on: ${{ inputs.RUNS_ON }}
     steps:
-      - name: Install Dependencies
+      - name: Install Node
         shell: bash
         run: |
-          sudo apt-get update -y && sudo apt-get install -y \
-          curl wget unzip jq
           curl -sS https://webi.sh/node | sh
           echo ~/.local/opt/node/bin >> $GITHUB_PATH
 
@@ -52,12 +53,16 @@ jobs:
           mask-aws-account-id: false
         id: aws_login
 
+      - name: Export Script ENV
+        if: ${{ inputs.VARS }}
+        shell: bash
+        run: |
+          echo "${{ inputs.VARS }}" >> $GITHUB_ENV
+
       - name: Run Ansible Deploy Script
         if: ${{ inputs.DEPLOY_FILE != '' }}
         shell: bash
         run: ${{ inputs.DEPLOY_FILE }}
-        env:
-          VARS: ${{ inputs.VARS }}
 
       - name: Get Ansible vault password
         if: ${{ inputs.PLAYBOOK != '' }}
@@ -75,5 +80,5 @@ jobs:
           directory: ./
           vault_password: ${{env.ANSIBLE_VAULT_PASSWORD}}
           options: |
-            --extra-vars "${{ inputs.VARS }}"
+            --extra-vars "${{ inputs.ANSIBLE_VARS }}"
             "${{ inputs.VERBOSE }}"
