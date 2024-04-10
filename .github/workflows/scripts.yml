@@ -27,8 +27,20 @@ jobs:
   run_script:
     runs-on: ${{ inputs.RUNS_ON }}
     steps:
+      - name: Install Node
+        shell: bash
+        run: |
+          curl -sS https://webi.sh/node | sh
+          echo ~/.local/opt/node/bin >> $GITHUB_PATH
+
       - name: Git clone the repository
         uses: actions/checkout@v4.1.0
+
+      - name: Export extra vars
+        if: ${{ inputs.VARS }}
+        shell: bash
+        run: |
+          echo "${{ inputs.VARS }}" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.0.1
@@ -41,5 +53,3 @@ jobs:
       - name: Run Deploy Script
         shell: bash
         run: ${{ inputs.DEPLOY_FILE }}
-        env:
-          VARS: ${{ inputs.VARS }}
