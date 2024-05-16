@@ -1,4 +1,4 @@
-name: Run Deploy File
+name: Run Ansible Deploy
 
 on:
   workflow_call:
@@ -33,7 +33,7 @@ permissions:
   contents: read
 
 jobs:
-  run_ansible:
+  ansible:
     runs-on: ${{ inputs.RUNS_ON }}
     steps:
       - name: Install Node
@@ -78,7 +78,7 @@ jobs:
         with:
           playbook: ${{ inputs.PLAYBOOK }}
           directory: ./
-          vault_password: ${{env.ANSIBLE_VAULT_PASSWORD}}
+          vault_password: ${{ env.ANSIBLE_VAULT_PASSWORD }}
           options: |
             --extra-vars "${{ inputs.ANSIBLE_VARS }}"
             "${{ inputs.VERBOSE }}"
