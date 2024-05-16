@@ -1,0 +1,90 @@
+name: Docker Run
+
+on:
+  workflow_call:
+    inputs:
+      RUNS_ON:
+        required: true
+        type: string
+      AWS_ROLE:
+        required: true
+        type: string
+      AWS_REGION:
+        required: true
+        type: string
+      REGISTRY:
+        required: false
+        type: string
+        default: "889132874985"
+      IMAGE:
+        required: true
+        type: string
+      ROLE_CHAINING:
+        required: false
+        type: boolean
+        default: false
+      SKIP_SESSION_TAGGING:
+        required: false
+        type: boolean
+        default: false
+      IMAGE_TAG:
+        required: true
+        type: string
+      COMMAND:
+        required: false
+        type: string
+      VARS:
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  docker_run:
+    runs-on: ${{ inputs.RUNS_ON }}
+    steps:
+      - name: Install Node
+        shell: bash
+        run: |
+          curl -sS https://webi.sh/node | sh
+          echo ~/.local/opt/node/bin >> $GITHUB_PATH
+
+      - name: Git clone the repository
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          role-to-assume: ${{ inputs.AWS_ROLE }}
+          aws-region: ${{ inputs.AWS_REGION }}
+          mask-aws-account-id: false
+          role-chaining: ${{ inputs.ROLE_CHAINING }}
+          role-skip-session-tagging: ${{ inputs.SKIP_SESSION_TAGGING }}
+          output-credentials: true
+
+      - name: Login to Amazon ECR Private
+        uses: aws-actions/amazon-ecr-login@v2.0.1
+        id: login-ecr
+        with:
+          registries: ${{ inputs.REGISTRY }}
+
+      - name: Export extra vars
+        if: ${{ inputs.VARS }}
+        shell: bash
+        run: |
+          echo "${{ inputs.VARS }}" >> env_file
+
+      - name: Export AWS credentials to env file
+        shell: bash
+        run: |
+          echo "AWS_ACCESS_KEY_ID=${{ steps.creds.outputs.aws-access-key-id }}" >> env_file
+          echo "AWS_SECRET_ACCESS_KEY=${{ steps.creds.outputs.aws-secret-access-key }}" >> env_file
+          echo "AWS_SESSION_TOKEN=${{ steps.creds.outputs.aws-session-token }}" >> env_file
+
+      - name: Docker Run
+        shell: bash
+        run: |
+          docker run --env-file env_file ${{ steps.login-ecr.outputs.registry }}/${{ inputs.IMAGE }}:${{ inputs.IMAGE_TAG }} ${{ inputs.COMMAND }}
