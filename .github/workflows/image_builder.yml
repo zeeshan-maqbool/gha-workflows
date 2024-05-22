@@ -89,26 +89,16 @@ jobs:
         with:
           context: .
           file: ${{ inputs.IMAGE_FILE }}
-          push: false
-          tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
+          push: true
+          tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
           platforms: ${{ inputs.PLATFORMS }}
           cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
           cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache,mode=max,image-manifest=true
 
-      - name: Load image for scanning
-        uses: docker/build-push-action@v5.2.0
-        with:
-          context: .
-          file: ${{ inputs.IMAGE_FILE }}
-          load: true
-          tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
-          platforms: ${{ env.OS_ARCH }}
-          cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
-
       - name: Vulnerability Scan
-        uses: aquasecurity/trivy-action@0.18.0
+        uses: aquasecurity/trivy-action@0.20.0
         with:
-          image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
+          image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
           scan-type: 'image'
           ignore-unfixed: true
           vuln-type: 'os,library'
@@ -126,3 +116,9 @@ jobs:
           tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
           platforms: ${{ inputs.PLATFORMS }}
           cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
+
+      - name: Clean up cache and scan imagas
+        shell: bash
+        run: |
+          aws ecr batch-delete-image --repository-name ${{ inputs.REPO_NAME }} --image-ids imageTag=${{ inputs.IMAGE_TAG }}-cache
+          aws ecr batch-delete-image --repository-name ${{ inputs.REPO_NAME }} --image-ids imageTag=${{ inputs.IMAGE_TAG }}-scan
