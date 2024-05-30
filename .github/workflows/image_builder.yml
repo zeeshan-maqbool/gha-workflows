@@ -37,6 +37,10 @@ on:
         required: false
         type: boolean
         default: false
+      CHECKOUT_SUBMODULES:
+        required: false
+        type: string
+        default: ''
 
 permissions:
   id-token: write
@@ -53,7 +57,9 @@ jobs:
           echo ~/.local/opt/node/bin >> $GITHUB_PATH
 
       - name: Git clone the repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          submodules: ${{ inputs.CHECKOUT_SUBMODULES }}
 
       - name: Set ARCH env
         shell: bash
