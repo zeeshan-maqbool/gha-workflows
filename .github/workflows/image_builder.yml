@@ -82,10 +82,6 @@ jobs:
             echo "ALLOW_VULN=1" >> $GITHUB_ENV
           fi
 
-      - name: Translate ALLOW_VULNERABILITIES
-        run: |
-
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.0.2
         with:

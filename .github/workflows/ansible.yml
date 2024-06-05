@@ -21,7 +21,7 @@ on:
       ANSIBLE_VARS:
         required: false
         type: string
-        default: 'none'
+        default: ''
       PLAYBOOK:
         required: false
         type: string
@@ -74,7 +74,17 @@ jobs:
           OUTPUT_PATH: .env
 
       - name: Run playbook
-        if: ${{ inputs.PLAYBOOK != '' }}
+        if: ${{ inputs.PLAYBOOK != '' && inputs.ANSIBLE_VARS == '' }}
+        uses: dawidd6/action-ansible-playbook@v2
+        with:
+          playbook: ${{ inputs.PLAYBOOK }}
+          directory: ./
+          vault_password: ${{ env.ANSIBLE_VAULT_PASSWORD }}
+          options: |
+            "${{ inputs.VERBOSE }}"
+
+      - name: Run playbook with extra vars
+        if: ${{ inputs.PLAYBOOK != '' && inputs.ANSIBLE_VARS != '' }}
         uses: dawidd6/action-ansible-playbook@v2
         with:
           playbook: ${{ inputs.PLAYBOOK }}
