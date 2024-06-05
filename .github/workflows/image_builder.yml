@@ -23,6 +23,10 @@ on:
       REPO_NAME:
         required: true
         type: string
+      CONTEXT:
+        required: false
+        type: string
+        default: .
       IMAGE_FILE:
         required: false
         type: string
@@ -41,6 +45,10 @@ on:
         required: false
         type: string
         default: ''
+      ALLOW_VULNERABILITIES:
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   id-token: write
@@ -61,9 +69,22 @@ jobs:
         with:
           submodules: ${{ inputs.CHECKOUT_SUBMODULES }}
 
-      - name: Set ARCH env
+      - name: SET ENVS
         shell: bash
-        run: echo "OS_ARCH=$(docker version --format '{{.Client.Os}}/{{.Client.Arch}}')" >> $GITHUB_ENV
+        run: |
+          # Set OS Architecture
+          echo "OS_ARCH=$(docker version --format '{{.Client.Os}}/{{.Client.Arch}}')" >> $GITHUB_ENV
+
+          # Translate ALLOW_VULNERABILITIES to 0 or 1
+          if ${{ inputs.ALLOW_VULNERABILITIES }}; then
+            echo "ALLOW_VULN=0" >> $GITHUB_ENV
+          else
+            echo "ALLOW_VULN=1" >> $GITHUB_ENV
+          fi
+
+      - name: Translate ALLOW_VULNERABILITIES
+        run: |
+
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.0.2
@@ -93,7 +114,7 @@ jobs:
       - name: Build Docker Image
         uses: docker/build-push-action@v5.2.0
         with:
-          context: .
+          context: ${{ inputs.CONTEXT }}
           file: ${{ inputs.IMAGE_FILE }}
           push: true
           tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
@@ -110,13 +131,13 @@ jobs:
           vuln-type: 'os,library'
           scanners: 'vuln'
           severity: 'CRITICAL'
-          exit-code: '1'
+          exit-code: ${{ env.ALLOW_VULN }}
 
       - name: Push Docker Image
         if: ${{ inputs.PUSH_IMAGE }}
         uses: docker/build-push-action@v5.2.0
         with:
-          context: .
+          context: ${{ inputs.CONTEXT }}
           file: ${{ inputs.IMAGE_FILE }}
           push: true
           tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'

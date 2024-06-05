@@ -21,6 +21,7 @@ on:
       ANSIBLE_VARS:
         required: false
         type: string
+        default: 'none'
       PLAYBOOK:
         required: false
         type: string
