@@ -1,10 +1,36 @@
 # Github Actions Workflows
+### Image Builder
 
-### Ansible
----
-This GitHub workflow automates deployments of Ansible playbooks and scripts to AWS. It is triggered by a `workflow_call` event which allows invoking it from other workflows.
+This GitHub Action workflow automates building container images using Buildx, supporting multiple platforms, including ARM and AMD, with QEMU. The built images are stored in an Amazon ECR repository in the delivery account.
 
 ### Inputs
+
+The workflow allows the following inputs to be configured:
+
+- **`RUNS_ON`**: Specifies the operating system for running jobs (required).
+- **`RUN_ENV`**: The environment in which the workflow is being run (required).
+- **`REPO_NAME`**: Name of the Amazon ECR repository where the image will be stored (required).
+- **`CONTEXT`**: The build context (default is `.`).
+- **`IMAGE_FILE`**: Path to the Dockerfile (default is `Dockerfile`).
+- **`IMAGE_TAG`**: Tag for the Docker image (required).
+- **`PLATFORMS`**: Specifies the OS and architecture combinations to build the image for (required).
+- **`PUSH_IMAGE`**: Boolean flag to determine whether to push the image to ECR (default is `false`).
+- **`CHECKOUT_SUBMODULES`**: Option to check out submodules if your project uses them (default is an empty string).
+- **`ALLOW_VULNERABILITIES`**: Boolean flag to allow pushing the image to ECR even if vulnerabilities are detected (default is `false`).
+
+
+### Features
+
+- **Multi-platform builds**: Leverages QEMU to build images for both ARM and AMD platforms.
+- **Automated ECR repository creation**: Upon successful build, the workflow automatically creates an ECR repository in the specified delivery account for image storage.
+
+---
+
+### Ansible
+
+This GitHub workflow automates deployments of Ansible playbooks and scripts to AWS. It is triggered by a `workflow_call` event which allows invoking it from other workflows.
+
+#### Inputs
 
 The following inputs can be configured:
 
@@ -29,32 +55,3 @@ It then executes the deployment process:
 - If `PLAYBOOK` is provided, it runs the playbook. Variables specified in `VARS` are passed to Ansible.
 
 For playbook executions, it first retrieves the Ansible vault password from AWS Secrets Manager.
-
-### Image Builder
----
-This GitHub workflow automates building container images using buildx
-
-### Inputs
-
-The following inputs can be configured:
-
-- `RUNS_ON` - The operating system to run jobs on
-- `AWS_ROLE` - The AWS role to assume
-- `AWS_REGION` - The target AWS region
-- `REPO_NAME` - The ECR repository name
-- `IMAGE_FILE` - The Dockerfile path (default `Dockerfile`)
-- `IMAGE_TAG` - The image tag
-- `PLATFORMS` - OS/architectures to build for
-- `PUSH_IMAGE` - Whether to push to ECR (default `false`)
-
-### Jobs
-
-The `build_and_push` job performs the following steps:
-1. Clones the repository.
-2. Configures AWS credentials.
-3. Builds the image for each specified platform.
-4. Optionally pushes the images to ECR.
-
-The use of a matrix strategy allows for building across multiple platforms in parallel.
-
-This workflow provides a standardized process for building Docker images from source code, with customization options for different repositories or configurations through the inputs.
