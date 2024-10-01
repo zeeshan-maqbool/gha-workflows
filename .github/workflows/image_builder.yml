@@ -139,16 +139,17 @@ jobs:
           cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
           cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache,mode=max,image-manifest=true
 
-      - name: Vulnerability Scan
-        uses: aquasecurity/trivy-action@0.20.0
-        with:
-          image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
-          scan-type: 'image'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          scanners: 'vuln'
-          severity: 'CRITICAL'
-          exit-code: ${{ env.ALLOW_VULN }}
+      # Paused due to trivy bug DOS-5241
+      # - name: Vulnerability Scan
+      #   uses: aquasecurity/trivy-action@0.20.0
+      #   with:
+      #     image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
+      #     scan-type: 'image'
+      #     ignore-unfixed: true
+      #     vuln-type: 'os,library'
+      #     scanners: 'vuln'
+      #     severity: 'CRITICAL'
+      #     exit-code: ${{ env.ALLOW_VULN }}
 
       - name: Push Docker Image
         if: ${{ inputs.PUSH_IMAGE }}
