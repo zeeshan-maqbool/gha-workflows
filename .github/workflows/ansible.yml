@@ -41,11 +41,13 @@ jobs:
         uses: actions/checkout@v4.1.0
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4.0.1
+        uses: aws-actions/configure-aws-credentials@main
         with:
           role-to-assume: ${{ inputs.AWS_ROLE }}
           aws-region: ${{ inputs.AWS_REGION }}
           mask-aws-account-id: false
+          role-chaining: true
+          role-skip-session-tagging: true
         id: aws_login
 
       - name: Export Script ENV
@@ -64,7 +66,7 @@ jobs:
         uses: say8425/aws-secrets-manager-actions@v2.2.1
         with:
           SECRET_NAME: ansible-vault-password
-          AWS_DEFAULT_REGION: eu-west-1
+          AWS_DEFAULT_REGION: ${{ inputs.AWS_REGION }}
           OUTPUT_PATH: .env
 
       - name: Run playbook

@@ -15,7 +15,7 @@ on:
       REGISTRY:
         required: false
         type: string
-        default: "889132874985"
+        default: "823386275404"
       IMAGE:
         required: true
         type: string
@@ -50,7 +50,7 @@ jobs:
 
       - name: Configure AWS credentials
         id: creds
-        uses: aws-actions/configure-aws-credentials@v4.0.2
+        uses: aws-actions/configure-aws-credentials@main
         with:
           role-to-assume: ${{ inputs.AWS_ROLE }}
           aws-region: ${{ inputs.AWS_REGION }}
