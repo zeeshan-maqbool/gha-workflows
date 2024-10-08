@@ -6,8 +6,11 @@ on:
       RUNS_ON:
         required: true
         type: string
-      AWS_ROLE:
+      AWS_ACCOUNT_NAME:
         required: true
+        type: string
+      AWS_ALTERNATIVE_ROLE:
+        required: false
         type: string
       AWS_REGION:
         required: true
@@ -37,14 +40,11 @@ jobs:
           echo "${{ inputs.VARS }}" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@main
+        uses: getsmarter/gha-workflows/.github/actions/assume_repo_role@runner-switch
         with:
-          role-to-assume: ${{ inputs.AWS_ROLE }}
-          aws-region: ${{ inputs.AWS_REGION }}
-          mask-aws-account-id: false
-          role-chaining: true
-          role-skip-session-tagging: true
-        id: aws_login
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
+          AWS_ALTERNATIVE_ROLE: ${{ inputs.AWS_ALTERNATIVE_ROLE }}
 
       - name: Run Deploy Script
         shell: bash

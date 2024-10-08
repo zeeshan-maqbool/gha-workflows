@@ -9,6 +9,13 @@ on:
       AWS_REGION:
         required: true
         type: string
+      AWS_ACCOUNT_NAME:
+        type: string
+        required: false
+        default: 'corp-delivery-prod'
+      AWS_ALTERNATIVE_ROLE:
+        type: string
+        required: false
       REPO_NAME:
         required: true
         type: string
@@ -26,6 +33,10 @@ on:
       IMAGE_TAG:
         required: true
         type: string
+      BUILD_ARGS:
+        required: false
+        type: string
+        default: ''
       PLATFORMS:
         required: true
         type: string
@@ -49,8 +60,6 @@ permissions:
 jobs:
   build_and_push:
     runs-on: ${{ inputs.RUNS_ON }}
-    environment:
-      name: ${{ inputs.RUN_ENV }}
     steps:
       - name: Check repository secrets
         id: check-secrets
@@ -96,13 +105,11 @@ jobs:
           fi
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@main
+        uses: getsmarter/gha-workflows/.github/actions/assume_repo_role@runner-switch
         with:
-          role-to-assume: arn:aws:iam::823386275404:role/image-builder
-          aws-region: ${{ inputs.AWS_REGION }}
-          mask-aws-account-id: false
-          role-chaining: true
-          role-skip-session-tagging: true
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
+          AWS_ALTERNATIVE_ROLE: ${{ inputs.AWS_ALTERNATIVE_ROLE }}
 
       - name: Login to Amazon ECR Private
         uses: aws-actions/amazon-ecr-login@v2.0.1
@@ -133,18 +140,18 @@ jobs:
           platforms: ${{ inputs.PLATFORMS }}
           cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
           cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache,mode=max,image-manifest=true
+          build-args: ${{ inputs.BUILD_ARGS }}
 
-      # Paused due to trivy bug DOS-5241
-      # - name: Vulnerability Scan
-      #   uses: aquasecurity/trivy-action@0.20.0
-      #   with:
-      #     image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
-      #     scan-type: 'image'
-      #     ignore-unfixed: true
-      #     vuln-type: 'os,library'
-      #     scanners: 'vuln'
-      #     severity: 'CRITICAL'
-      #     exit-code: ${{ env.ALLOW_VULN }}
+      - name: Vulnerability Scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
+          scan-type: 'image'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          scanners: 'vuln'
+          severity: 'CRITICAL'
+          exit-code: ${{ env.ALLOW_VULN }}
 
       - name: Push Docker Image
         if: ${{ inputs.PUSH_IMAGE }}
@@ -156,6 +163,7 @@ jobs:
           tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
           platforms: ${{ inputs.PLATFORMS }}
           cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
+          build-args: ${{ inputs.BUILD_ARGS }}
 
       - name: Clean up cache and scan imagas
         shell: bash
