@@ -13,9 +13,6 @@ on:
         type: string
         required: false
         default: 'corp-delivery-prod'
-      AWS_ALTERNATIVE_ROLE:
-        type: string
-        required: false
       REPO_NAME:
         required: true
         type: string
@@ -33,13 +30,20 @@ on:
       IMAGE_TAG:
         required: true
         type: string
+      BUILD_SECRETS_NAME:
+        required: false
+        type: string
+      BUILD_SECRETS_OUTPUT_PATH:
+        required: false
+        type: string
       BUILD_ARGS:
         required: false
         type: string
         default: ''
       PLATFORMS:
-        required: true
+        required: false
         type: string
+        default: linux/amd64
       PUSH_IMAGE:
         required: false
         type: boolean
@@ -109,7 +113,7 @@ jobs:
         with:
           AWS_REGION: ${{ inputs.AWS_REGION }}
           AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
-          AWS_ALTERNATIVE_ROLE: ${{ inputs.AWS_ALTERNATIVE_ROLE }}
+          AWS_ALTERNATIVE_ROLE: arn:aws:iam::823386275404:role/gha-image-builder
 
       - name: Login to Amazon ECR Private
         uses: aws-actions/amazon-ecr-login@v2.0.1
@@ -129,6 +133,14 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3.1.0
+
+      - name: Store ENV from AWS SecretManager
+        if: ${{ inputs.BUILD_SECRETS_NAME }}
+        uses: say8425/aws-secrets-manager-actions@v2
+        with:
+          AWS_DEFAULT_REGION: ${{ inputs.AWS_REGION }}
+          SECRET_NAME: ${{ inputs.BUILD_SECRETS_NAME }}
+          OUTPUT_PATH: ${{ inputs.BUILD_SECRETS_OUTPUT_PATH }}
 
       - name: Build Docker Image
         uses: docker/build-push-action@v5.2.0
@@ -152,6 +164,10 @@ jobs:
           scanners: 'vuln'
           severity: 'CRITICAL'
           exit-code: ${{ env.ALLOW_VULN }}
+          cache: 'false'
+        env:
+          TRIVY_JAVA_DB_REPOSITORY: '823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/trivy:trivy-java-db'
+          TRIVY_DB_REPOSITORY: '823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/trivy:trivy-db'
 
       - name: Push Docker Image
         if: ${{ inputs.PUSH_IMAGE }}
