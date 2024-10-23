@@ -6,22 +6,18 @@ on:
       RUNS_ON:
         required: true
         type: string
-      AWS_ROLE:
-        required: true
-        type: string
       AWS_REGION:
         required: true
         type: string
-      ROLE_CHAINING:
+      AWS_ACCOUNT_NAME:
+        type: string
         required: false
-        type: boolean
-        default: false
-      SKIP_SESSION_TAGGING:
-        required: false
-        type: boolean
-        default: false
+        default: 'corp-delivery-prod'
       REPO_NAME:
         required: true
+        type: string
+      REPO_POLICY:
+        required: false
         type: string
       CONTEXT:
         required: false
@@ -34,9 +30,20 @@ on:
       IMAGE_TAG:
         required: true
         type: string
-      PLATFORMS:
-        required: true
+      BUILD_SECRETS_NAME:
+        required: false
         type: string
+      BUILD_SECRETS_OUTPUT_PATH:
+        required: false
+        type: string
+      BUILD_ARGS:
+        required: false
+        type: string
+        default: ''
+      PLATFORMS:
+        required: false
+        type: string
+        default: linux/amd64
       PUSH_IMAGE:
         required: false
         type: boolean
@@ -101,32 +108,42 @@ jobs:
             echo "ALLOW_VULN=1" >> $GITHUB_ENV
           fi
 
+
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4.0.2
+        uses: aws-actions/configure-aws-credentials@main
         with:
-          role-to-assume: ${{ inputs.AWS_ROLE }}
+          role-to-assume: arn:aws:iam::823386275404:role/gha-image-builder
           aws-region: ${{ inputs.AWS_REGION }}
           mask-aws-account-id: false
-          role-chaining: ${{ inputs.ROLE_CHAINING }}
-          role-skip-session-tagging: ${{ inputs.SKIP_SESSION_TAGGING }}
+          role-chaining: true
+          role-skip-session-tagging: true
 
       - name: Login to Amazon ECR Private
         uses: aws-actions/amazon-ecr-login@v2.0.1
         id: login-ecr
 
       - name: Create ECR repository if not exist
-        uses: int128/create-ecr-repository-action@v1.248.0
+        uses: int128/create-ecr-repository-action@v1.308.0
         id: ecr_repo
         with:
           repository: ${{ inputs.REPO_NAME }}
+          repository-policy: ${{ inputs.REPO_POLICY }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
-          image: 889132874985.dkr.ecr.eu-west-1.amazonaws.com/docker-hub/tonistiigi/binfmt:latest
+          image: 823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/docker-hub/tonistiigi/binfmt:latest
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3.1.0
+
+      - name: Store ENV from AWS SecretManager
+        if: ${{ inputs.BUILD_SECRETS_NAME }}
+        uses: say8425/aws-secrets-manager-actions@v2
+        with:
+          AWS_DEFAULT_REGION: ${{ inputs.AWS_REGION }}
+          SECRET_NAME: ${{ inputs.BUILD_SECRETS_NAME }}
+          OUTPUT_PATH: ${{ inputs.BUILD_SECRETS_OUTPUT_PATH }}
 
       - name: Build Docker Image
         uses: docker/build-push-action@v5.2.0
@@ -138,18 +155,22 @@ jobs:
           platforms: ${{ inputs.PLATFORMS }}
           cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
           cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache,mode=max,image-manifest=true
+          build-args: ${{ inputs.BUILD_ARGS }}
 
-      # Paused due to trivy bug DOS-5241
-      # - name: Vulnerability Scan
-      #   uses: aquasecurity/trivy-action@0.20.0
-      #   with:
-      #     image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
-      #     scan-type: 'image'
-      #     ignore-unfixed: true
-      #     vuln-type: 'os,library'
-      #     scanners: 'vuln'
-      #     severity: 'CRITICAL'
-      #     exit-code: ${{ env.ALLOW_VULN }}
+      - name: Vulnerability Scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
+          scan-type: 'image'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          scanners: 'vuln'
+          severity: 'CRITICAL'
+          exit-code: ${{ env.ALLOW_VULN }}
+          cache: 'false'
+        env:
+          TRIVY_JAVA_DB_REPOSITORY: '823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/trivy:trivy-java-db'
+          TRIVY_DB_REPOSITORY: '823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/trivy:trivy-db'
 
       - name: Push Docker Image
         if: ${{ inputs.PUSH_IMAGE }}
@@ -161,6 +182,7 @@ jobs:
           tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
           platforms: ${{ inputs.PLATFORMS }}
           cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
+          build-args: ${{ inputs.BUILD_ARGS }}
 
       - name: Clean up cache and scan imagas
         shell: bash

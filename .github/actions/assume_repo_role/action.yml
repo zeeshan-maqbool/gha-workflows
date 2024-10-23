@@ -1,0 +1,42 @@
+name: 'Assume Repo Role'
+inputs:
+  AWS_REGION:
+    description: 'The AWS region to use'
+    required: true
+    default: 'us-east-1'
+  AWS_ACCOUNT_NAME:
+    description: 'AWS Account name to deploy to'
+    required: false
+    default: 'corp-delivery-prod'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get repo and secret name
+      shell: bash
+      run: |
+        REPO=$(echo $GITHUB_REPOSITORY | cut -d'/' -f2 | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+        echo "REPO=$REPO" >> $GITHUB_ENV
+
+    - name: Get repo roles
+      uses: aws-actions/aws-secretsmanager-get-secrets@v2
+      with:
+        secret-ids: |
+          ,${{ inputs.AWS_ACCOUNT_NAME }}/gha-aws-auth
+        parse-json-secrets: true
+
+    - name: Set role ARN
+      shell: bash
+      run: |
+        ROLE_ARN=$(printenv $REPO)
+        echo "ROLE_ARN=$ROLE_ARN" >> $GITHUB_ENV
+
+    - name: Configure AWS credentials Repo Role
+      uses: aws-actions/configure-aws-credentials@main
+      with:
+        role-to-assume: ${{ env.ROLE_ARN }}
+        aws-region: ${{ inputs.AWS_REGION }}
+        mask-aws-account-id: false
+        role-chaining: true
+        role-skip-session-tagging: true
+

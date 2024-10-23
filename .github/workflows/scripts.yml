@@ -6,9 +6,10 @@ on:
       RUNS_ON:
         required: true
         type: string
-      AWS_ROLE:
-        required: true
+      AWS_ACCOUNT_NAME:
         type: string
+        required: false
+        default: 'corp-delivery-prod'
       AWS_REGION:
         required: true
         type: string
@@ -37,12 +38,10 @@ jobs:
           echo "${{ inputs.VARS }}" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4.0.1
+        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
         with:
-          role-to-assume: ${{ inputs.AWS_ROLE }}
-          aws-region: ${{ inputs.AWS_REGION }}
-          mask-aws-account-id: false
-        id: aws_login
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
 
       - name: Run Deploy Script
         shell: bash

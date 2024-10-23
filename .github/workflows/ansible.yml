@@ -6,9 +6,10 @@ on:
       RUNS_ON:
         required: true
         type: string
-      AWS_ROLE:
-        required: true
+      AWS_ACCOUNT_NAME:
         type: string
+        required: false
+        default: 'corp-delivery-prod'
       AWS_REGION:
         required: true
         type: string
@@ -19,6 +20,10 @@ on:
         required: false
         type: string
       ANSIBLE_VARS:
+        required: false
+        type: string
+        default: ''
+      ANSIBLE_SECRET:
         required: false
         type: string
         default: ''
@@ -41,12 +46,10 @@ jobs:
         uses: actions/checkout@v4.1.0
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4.0.1
+        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
         with:
-          role-to-assume: ${{ inputs.AWS_ROLE }}
-          aws-region: ${{ inputs.AWS_REGION }}
-          mask-aws-account-id: false
-        id: aws_login
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
 
       - name: Export Script ENV
         if: ${{ inputs.VARS }}
@@ -60,10 +63,10 @@ jobs:
         run: ${{ inputs.DEPLOY_FILE }}
 
       - name: Get Ansible vault password
-        if: ${{ inputs.PLAYBOOK != '' }}
+        if: ${{ inputs.ANSIBLE_SECRET != '' }}
         uses: say8425/aws-secrets-manager-actions@v2.2.1
         with:
-          SECRET_NAME: ansible-vault-password
+          SECRET_NAME: ${{ inputs.ANSIBLE_SECRET }}
           AWS_DEFAULT_REGION: eu-west-1
           OUTPUT_PATH: .env
 

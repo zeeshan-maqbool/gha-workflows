@@ -3,7 +3,3 @@ Branch Merge Order: -> main
 
 Changes:
 -
-
-Reviewers :
--
-@getsmarter/devops-engineers
