@@ -41,7 +41,7 @@ jobs:
           echo "${{ inputs.VARS }}" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
-        uses: getsmarter/gha-workflows/.github/actions/assume_repo_role@runner-switch
+        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
         with:
           AWS_REGION: ${{ inputs.AWS_REGION }}
           AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
