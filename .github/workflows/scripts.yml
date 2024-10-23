@@ -10,9 +10,6 @@ on:
         type: string
         required: false
         default: 'corp-delivery-prod'
-      AWS_ALTERNATIVE_ROLE:
-        required: false
-        type: string
       AWS_REGION:
         required: true
         type: string
@@ -45,7 +42,6 @@ jobs:
         with:
           AWS_REGION: ${{ inputs.AWS_REGION }}
           AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
-          AWS_ALTERNATIVE_ROLE: ${{ inputs.AWS_ALTERNATIVE_ROLE }}
 
       - name: Run Deploy Script
         shell: bash

@@ -108,12 +108,15 @@ jobs:
             echo "ALLOW_VULN=1" >> $GITHUB_ENV
           fi
 
+
       - name: Configure AWS credentials
-        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
+        uses: aws-actions/configure-aws-credentials@main
         with:
-          AWS_REGION: ${{ inputs.AWS_REGION }}
-          AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
-          AWS_ALTERNATIVE_ROLE: arn:aws:iam::823386275404:role/gha-image-builder
+          role-to-assume: arn:aws:iam::823386275404:role/gha-image-builder
+          aws-region: ${{ inputs.AWS_REGION }}
+          mask-aws-account-id: false
+          role-chaining: true
+          role-skip-session-tagging: true
 
       - name: Login to Amazon ECR Private
         uses: aws-actions/amazon-ecr-login@v2.0.1
