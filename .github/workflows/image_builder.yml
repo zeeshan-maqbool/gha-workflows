@@ -108,7 +108,6 @@ jobs:
             echo "ALLOW_VULN=1" >> $GITHUB_ENV
           fi
 
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@main
         with:
@@ -184,7 +183,16 @@ jobs:
           cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
           build-args: ${{ inputs.BUILD_ARGS }}
 
-      - name: Clean up cache and scan imagas
+      - name: Install AWS CLI if not already installed
+        shell: bash
+        run: |
+          if ! command -v aws &> /dev/null; then
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+          fi
+
+      - name: Clean up cache and scan images
         shell: bash
         run: |
           aws ecr batch-delete-image --repository-name ${{ inputs.REPO_NAME }} --image-ids imageTag=${{ inputs.IMAGE_TAG }}-cache
