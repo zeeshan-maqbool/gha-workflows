@@ -56,6 +56,10 @@ on:
         required: false
         type: boolean
         default: false
+      USE_ROLE_CHAINING:
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   id-token: write
@@ -114,7 +118,7 @@ jobs:
           role-to-assume: arn:aws:iam::823386275404:role/gha-image-builder
           aws-region: ${{ inputs.AWS_REGION }}
           mask-aws-account-id: false
-          role-chaining: true
+          role-chaining: ${{ inputs.USE_ROLE_CHAINING }}
           role-skip-session-tagging: true
 
       - name: Login to Amazon ECR Private
