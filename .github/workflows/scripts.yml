@@ -19,10 +19,6 @@ on:
       VARS:
         required: false
         type: string
-      NODE_VERSION:
-        required: false
-        type: string
-        default: '22.13.1'
 
 permissions:
   id-token: write
@@ -33,7 +29,6 @@ jobs:
     runs-on: ${{ inputs.RUNS_ON }}
     container:
       image: public.ecr.aws/sam/build-nodejs22.x:1.132.0-20241211194235
-    
     steps:
       - name: Git clone the repository
         uses: actions/checkout@v4.1.0
@@ -45,7 +40,7 @@ jobs:
           echo "${{ inputs.VARS }}" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
-        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
+        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@hl-test-region
         with:
           AWS_REGION: ${{ inputs.AWS_REGION }}
           AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
