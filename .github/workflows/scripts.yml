@@ -30,7 +30,6 @@ jobs:
     container:
       image: public.ecr.aws/sam/build-nodejs22.x:1.132.0-20241211194235
       env:
-        AWS_CONTAINER_CREDENTIALS_FULL_URI: http://169.254.170.23/v1/credentials
         AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
         AWS_ROLE_ARN: arn:aws:iam::823386275404:role/2uinc-gha-mgmt-default
       volumes:
