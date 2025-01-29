@@ -44,6 +44,7 @@ jobs:
         shell: bash
         run: |
           echo "${{ inputs.VARS }}" >> $GITHUB_ENV
+          printenv
 
       - name: Configure AWS credentials
         uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@hl-test-region
