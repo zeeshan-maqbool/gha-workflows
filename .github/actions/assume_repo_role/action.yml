@@ -21,7 +21,6 @@ runs:
     - name: Get iam role and set region
       shell: bash
       run: |
-        aws sts get-caller-identity
         echo "AWS_REGION=${{ inputs.AWS_REGION }}" >> $GITHUB_ENV
 
     - name: Get repo roles
