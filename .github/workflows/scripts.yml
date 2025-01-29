@@ -29,6 +29,11 @@ jobs:
     runs-on: ${{ inputs.RUNS_ON }}
     container:
       image: public.ecr.aws/sam/build-nodejs22.x:1.132.0-20241211194235
+      env:
+        AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE:  /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
+        AWS_ROLE_ARN: arn:aws:iam::823386275404:role/2uinc-gha-mgmt-default
+      volumes:
+        - /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token:/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
     steps:
       - name: Git clone the repository
         uses: actions/checkout@v4.1.0
