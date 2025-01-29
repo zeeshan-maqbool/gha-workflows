@@ -31,6 +31,9 @@ permissions:
 jobs:
   run_script:
     runs-on: ${{ inputs.RUNS_ON }}
+    container:
+      image: public.ecr.aws/sam/build-nodejs22.x:1.132.0-20241211194235
+    
     steps:
       - name: Git clone the repository
         uses: actions/checkout@v4.1.0
@@ -41,12 +44,6 @@ jobs:
         run: |
           echo "${{ inputs.VARS }}" >> $GITHUB_ENV
 
-      - name: Set up Node.js
-        if: ${{ inputs.NODE_VERSION }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ inputs.NODE_VERSION }}
-          
       - name: Configure AWS credentials
         uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
         with:
