@@ -19,16 +19,21 @@ on:
       VARS:
         required: false
         type: string
+      IMAGE:
+        required: false
+        type: string
+        default: ''
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  run_script:
+  run_script_container:
+    if: ${{ inputs.IMAGE }}
     runs-on: ${{ inputs.RUNS_ON }}
     container:
-      image: public.ecr.aws/sam/build-nodejs22.x:1.132.0-20241211194235
+      image: ${{ inputs.IMAGE }}
       env:
         AWS_CONTAINER_CREDENTIALS_FULL_URI: http://169.254.170.23/v1/credentials
         AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
@@ -46,7 +51,31 @@ jobs:
           echo "${{ inputs.VARS }}" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
-        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@hl-test-region
+        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
+        with:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
+
+      - name: Run Deploy Script
+        shell: bash
+        run: ${{ inputs.DEPLOY_FILE }}
+  
+
+  run_script:
+    if: ${{ inputs.IMAGE == '' }}
+    runs-on: ${{ inputs.RUNS_ON }}
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v4.1.0
+
+      - name: Export extra vars
+        if: ${{ inputs.VARS }}
+        shell: bash
+        run: |
+          echo "${{ inputs.VARS }}" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
         with:
           AWS_REGION: ${{ inputs.AWS_REGION }}
           AWS_ACCOUNT_NAME: ${{ inputs.AWS_ACCOUNT_NAME }}
