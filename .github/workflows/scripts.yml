@@ -32,7 +32,7 @@ jobs:
       env:
         AWS_CONTAINER_CREDENTIALS_FULL_URI: http://169.254.170.23/v1/credentials
         AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
-        AWS_ROLE_ARN: arn:aws:iam::823386275404:role/2uinc-gha-mgmt-default
+        AWS_ROLE_ARN: arn:aws:iam::823386275404:role/${GITHUB_REPOSITORY_OWNER}-gha-mgmt-default
       volumes:
         - /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token:/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
     steps:
@@ -44,7 +44,6 @@ jobs:
         shell: bash
         run: |
           echo "${{ inputs.VARS }}" >> $GITHUB_ENV
-          printenv
 
       - name: Configure AWS credentials
         uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@hl-test-region
