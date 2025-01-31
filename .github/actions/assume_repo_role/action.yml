@@ -18,6 +18,11 @@ runs:
         REPO=$(echo $GITHUB_REPOSITORY | cut -d'/' -f2 | tr '[:lower:]' '[:upper:]' | tr '-' '_')
         echo "REPO=$REPO" >> $GITHUB_ENV
 
+    - name: Set region
+      shell: bash
+      run: |
+        echo "AWS_REGION=${{ inputs.AWS_REGION }}" >> $GITHUB_ENV
+
     - name: Get repo roles
       uses: aws-actions/aws-secretsmanager-get-secrets@v2
       with:
