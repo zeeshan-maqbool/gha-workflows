@@ -18,7 +18,7 @@ runs:
         REPO=$(echo $GITHUB_REPOSITORY | cut -d'/' -f2 | tr '[:lower:]' '[:upper:]' | tr '-' '_')
         echo "REPO=$REPO" >> $GITHUB_ENV
 
-    - name: Get iam role and set region
+    - name: Set region
       shell: bash
       run: |
         echo "AWS_REGION=${{ inputs.AWS_REGION }}" >> $GITHUB_ENV
