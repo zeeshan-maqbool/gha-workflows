@@ -1,0 +1,199 @@
+name: 'Image Builder'
+description: 'Builds and pushes Docker images to ECR with security scanning'
+
+inputs:
+  RUNS_ON:
+    description: 'Runner to use for the job'
+    required: true
+  AWS_REGION:
+    description: 'AWS region for ECR'
+    required: true
+  AWS_ACCOUNT_NAME:
+    description: 'AWS account name'
+    required: false
+    default: 'corp-delivery-prod'
+  REPO_NAME:
+    description: 'ECR repository name'
+    required: true
+  REPO_POLICY:
+    description: 'ECR repository policy'
+    required: false
+  CONTEXT:
+    description: 'Docker build context'
+    required: false
+    default: '.'
+  IMAGE_FILE:
+    description: 'Dockerfile path'
+    required: false
+    default: 'Dockerfile'
+  IMAGE_TAG:
+    description: 'Image tag'
+    required: true
+  BUILD_SECRETS_NAME:
+    description: 'AWS Secrets Manager secret name'
+    required: false
+  BUILD_SECRETS_OUTPUT_PATH:
+    description: 'Path to output secrets'
+    required: false
+  BUILD_ARGS:
+    description: 'Docker build arguments'
+    required: false
+    default: ''
+  PLATFORMS:
+    description: 'Build platforms'
+    required: false
+    default: 'linux/amd64'
+  PUSH_IMAGE:
+    description: 'Whether to push the final image'
+    required: false
+    default: 'false'
+  CHECKOUT_SUBMODULES:
+    description: 'Checkout submodules strategy'
+    required: false
+    default: ''
+  ALLOW_VULNERABILITIES:
+    description: 'Allow vulnerabilities in scan'
+    required: false
+    default: 'false'
+  SKIP_SESSION_TAGGING:
+    description: 'Skip AWS session tagging'
+    required: false
+    default: 'true'
+  USE_ROLE_CHAINING:
+    description: 'Use AWS role chaining'
+    required: false
+    default: 'true'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check repository secrets
+      id: check-secrets
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.ACTIONS_RUNNER_APP_ID }}" ]; then
+          echo "REPO_SECRETS_SET=false" >> $GITHUB_ENV
+        else
+          echo "REPO_SECRETS_SET=true" >> $GITHUB_ENV
+        fi
+
+    - name: Git clone the repository
+      if: ${{ !inputs.CHECKOUT_SUBMODULES }}
+      uses: actions/checkout@v4
+
+    - name: Generate Github Token
+      if: ${{ env.REPO_SECRETS_SET == 'true' && inputs.CHECKOUT_SUBMODULES }}
+      uses: actions/create-github-app-token@v1
+      id: app-token
+      with:
+        app-id: ${{ inputs.ACTIONS_RUNNER_APP_ID }}
+        private-key: ${{ inputs.ACTIONS_RUNNER_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+
+    - name: Git clone repository with submodules
+      if: ${{ inputs.CHECKOUT_SUBMODULES }}
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        token: ${{ steps.app-token.outputs.token || github.token}}
+        submodules: ${{ inputs.CHECKOUT_SUBMODULES }}
+
+    - name: Set env
+      shell: bash
+      run: |
+        echo "OS_ARCH=$(docker version --format '{{.Client.Os}}/{{.Client.Arch}}')" >> $GITHUB_ENV
+        if ${{ inputs.ALLOW_VULNERABILITIES }}; then
+          echo "ALLOW_VULN=0" >> $GITHUB_ENV
+        else
+          echo "ALLOW_VULN=1" >> $GITHUB_ENV
+        fi
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@main
+      with:
+        role-to-assume: arn:aws:iam::823386275404:role/gha-image-builder
+        aws-region: ${{ inputs.AWS_REGION }}
+        mask-aws-account-id: false
+        role-chaining: ${{ inputs.USE_ROLE_CHAINING }}
+        role-skip-session-tagging: ${{ inputs.SKIP_SESSION_TAGGING }}
+
+    - name: Login to Amazon ECR Private
+      uses: aws-actions/amazon-ecr-login@v2.0.1
+      id: login-ecr
+
+    - name: Create ECR repository if not exist
+      uses: int128/create-ecr-repository-action@v1.308.0
+      id: ecr_repo
+      with:
+        repository: ${{ inputs.REPO_NAME }}
+        repository-policy: ${{ inputs.REPO_POLICY }}
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      with:
+        image: 823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/docker-hub/tonistiigi/binfmt:latest
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3.1.0
+
+    - name: Store ENV from AWS SecretManager
+      if: ${{ inputs.BUILD_SECRETS_NAME }}
+      uses: say8425/aws-secrets-manager-actions@v2
+      with:
+        AWS_DEFAULT_REGION: ${{ inputs.AWS_REGION }}
+        SECRET_NAME: ${{ inputs.BUILD_SECRETS_NAME }}
+        OUTPUT_PATH: ${{ inputs.BUILD_SECRETS_OUTPUT_PATH }}
+
+    - name: Build Docker Image
+      uses: docker/build-push-action@v5.2.0
+      with:
+        context: ${{ inputs.CONTEXT }}
+        file: ${{ inputs.IMAGE_FILE }}
+        push: true
+        tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
+        platforms: ${{ inputs.PLATFORMS }}
+        cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
+        cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache,mode=max,image-manifest=true
+        build-args: ${{ inputs.BUILD_ARGS }}
+
+    - name: Vulnerability Scan
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
+        scan-type: 'image'
+        ignore-unfixed: true
+        vuln-type: 'os,library'
+        scanners: 'vuln'
+        severity: 'CRITICAL'
+        exit-code: ${{ env.ALLOW_VULN }}
+        cache: 'false'
+      env:
+        TRIVY_JAVA_DB_REPOSITORY: '823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/trivy:trivy-java-db'
+        TRIVY_DB_REPOSITORY: '823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/trivy:trivy-db'
+
+    - name: Push Docker Image
+      if: ${{ inputs.PUSH_IMAGE }}
+      uses: docker/build-push-action@v5.2.0
+      with:
+        context: ${{ inputs.CONTEXT }}
+        file: ${{ inputs.IMAGE_FILE }}
+        push: true
+        tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
+        platforms: ${{ inputs.PLATFORMS }}
+        cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
+        build-args: ${{ inputs.BUILD_ARGS }}
+
+    - name: Install AWS CLI
+      shell: bash
+      run: |
+        if ! command -v aws &> /dev/null; then
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+        fi
+
+    - name: Clean up cache and scan images
+      shell: bash
+      run: |
+        aws ecr batch-delete-image --repository-name ${{ inputs.REPO_NAME }} --image-ids imageTag=${{ inputs.IMAGE_TAG }}-cache
+        aws ecr batch-delete-image --repository-name ${{ inputs.REPO_NAME }} --image-ids imageTag=${{ inputs.IMAGE_TAG }}-scan
