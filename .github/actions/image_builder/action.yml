@@ -146,13 +146,22 @@ runs:
         SECRET_NAME: ${{ inputs.BUILD_SECRETS_NAME }}
         OUTPUT_PATH: ${{ inputs.BUILD_SECRETS_OUTPUT_PATH }}
 
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ steps.ecr_repo.outputs.repository-uri }}
+        tags: |
+          type=raw,value=${{ inputs.IMAGE_TAG }}
+          type=raw,value=${{ inputs.IMAGE_TAG }}-scan
+
     - name: Build Docker Image
       uses: docker/build-push-action@v5.2.0
       with:
         context: ${{ inputs.CONTEXT }}
         file: ${{ inputs.IMAGE_FILE }}
         push: true
-        tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
+        tags: ${{ steps.meta.outputs.tags }}
         platforms: ${{ inputs.PLATFORMS }}
         cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
         cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache,mode=max,image-manifest=true
@@ -173,17 +182,14 @@ runs:
         TRIVY_JAVA_DB_REPOSITORY: '823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/trivy:trivy-java-db'
         TRIVY_DB_REPOSITORY: '823386275404.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/trivy:trivy-db'
 
-    - name: Push Docker Image
+    - name: Promote Docker Image
       if: ${{ inputs.PUSH_IMAGE }}
-      uses: docker/build-push-action@v5.2.0
-      with:
-        context: ${{ inputs.CONTEXT }}
-        file: ${{ inputs.IMAGE_FILE }}
-        push: true
-        tags: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}'
-        platforms: ${{ inputs.PLATFORMS }}
-        cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
-        build-args: ${{ inputs.BUILD_ARGS }}
+      shell: bash
+      run: |
+        # No need for another build, just retag the image if vulnerability scan passes
+        docker buildx imagetools create \
+          ${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan \
+          --tag ${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}
 
     - name: Install AWS CLI
       shell: bash
