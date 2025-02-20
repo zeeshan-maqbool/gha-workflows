@@ -80,6 +80,8 @@ runs:
     - name: Git clone the repository
       if: ${{ !inputs.CHECKOUT_SUBMODULES }}
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
 
     - name: Generate Github Token
       if: ${{ env.REPO_SECRETS_SET == 'true' && inputs.CHECKOUT_SUBMODULES }}
