@@ -18,6 +18,9 @@ inputs:
   REPO_POLICY:
     description: 'ECR repository policy'
     required: false
+  LIFECYCLE_POLICY_FILE:
+    description: 'ECR lifecycle policy file'
+    required: false
   CONTEXT:
     description: 'Docker build context'
     required: false
@@ -80,8 +83,6 @@ runs:
     - name: Git clone the repository
       if: ${{ !inputs.CHECKOUT_SUBMODULES }}
       uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
 
     - name: Generate Github Token
       if: ${{ env.REPO_SECRETS_SET == 'true' && inputs.CHECKOUT_SUBMODULES }}
@@ -119,6 +120,24 @@ runs:
         role-chaining: ${{ inputs.USE_ROLE_CHAINING }}
         role-skip-session-tagging: ${{ inputs.SKIP_SESSION_TAGGING }}
 
+    - name: Install AWS CLI
+      shell: bash
+      run: |
+        if ! command -v aws &> /dev/null; then
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+        fi
+
+    - name: Get ECR Policies
+      shell: bash
+      id: ecr_policy
+      run: |
+        aws s3 cp s3://gha-workflows/ecr/ . \
+              --recursive \
+              --exclude "*" \
+              --include "*.json"
+
     - name: Login to Amazon ECR Private
       uses: aws-actions/amazon-ecr-login@v2.0.1
       id: login-ecr
@@ -129,6 +148,7 @@ runs:
       with:
         repository: ${{ inputs.REPO_NAME }}
         repository-policy: ${{ inputs.REPO_POLICY }}
+        lifecycle-policy: ${{ inputs.LIFECYCLE_POLICY_FILE || 'default-ecr-lifecycle-policy.json' }}
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
@@ -152,8 +172,8 @@ runs:
       with:
         images: ${{ steps.ecr_repo.outputs.repository-uri }}
         tags: |
-          type=raw,value=${{ inputs.IMAGE_TAG }}
-          type=raw,value=${{ inputs.IMAGE_TAG }}-scan
+          type=raw,prefix=scan-,value=${{ inputs.IMAGE_TAG }}
+          type=ref,prefix=release-,event=pr,enable=${{ github.event.pull_request.head.ref == 'release-*' }}
 
     - name: Build Docker Image
       uses: docker/build-push-action@v5.2.0
@@ -163,14 +183,14 @@ runs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         platforms: ${{ inputs.PLATFORMS }}
-        cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache
-        cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-cache,mode=max,image-manifest=true
+        cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:scan-${{ inputs.IMAGE_TAG }}
+        cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:cache-${{ inputs.IMAGE_TAG }},mode=max,image-manifest=true
         build-args: ${{ inputs.BUILD_ARGS }}
 
     - name: Vulnerability Scan
       uses: aquasecurity/trivy-action@0.28.0
       with:
-        image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan'
+        image-ref: '${{ steps.ecr_repo.outputs.repository-uri }}:scan-${{ inputs.IMAGE_TAG }}'
         scan-type: 'image'
         ignore-unfixed: true
         vuln-type: 'os,library'
@@ -188,20 +208,6 @@ runs:
       run: |
         # No need for another build, just retag the image if vulnerability scan passes
         docker buildx imagetools create \
-          ${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}-scan \
+          ${{ steps.ecr_repo.outputs.repository-uri }}:scan-${{ inputs.IMAGE_TAG }} \
+          --tag ${{ steps.ecr_repo.outputs.repository-uri }}:pr-${{ github.event.pull_request.number }} \
           --tag ${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}
-
-    - name: Install AWS CLI
-      shell: bash
-      run: |
-        if ! command -v aws &> /dev/null; then
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install
-        fi
-
-    - name: Clean up cache and scan images
-      shell: bash
-      run: |
-        aws ecr batch-delete-image --repository-name ${{ inputs.REPO_NAME }} --image-ids imageTag=${{ inputs.IMAGE_TAG }}-cache
-        aws ecr batch-delete-image --repository-name ${{ inputs.REPO_NAME }} --image-ids imageTag=${{ inputs.IMAGE_TAG }}-scan
