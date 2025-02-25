@@ -184,7 +184,7 @@ runs:
         tags: ${{ steps.meta.outputs.tags }}
         platforms: ${{ inputs.PLATFORMS }}
         cache-from: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:scan-${{ inputs.IMAGE_TAG }}
-        cache-to: type=registry,ref=${{ steps.ecr_repo.outputs.repository-uri }}:cache-${{ inputs.IMAGE_TAG }},mode=max,image-manifest=true
+        cache-to: type=inline
         build-args: ${{ inputs.BUILD_ARGS }}
 
     - name: Vulnerability Scan
