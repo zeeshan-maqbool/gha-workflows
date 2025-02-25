@@ -209,5 +209,4 @@ runs:
         # No need for another build, just retag the image if vulnerability scan passes
         docker buildx imagetools create \
           ${{ steps.ecr_repo.outputs.repository-uri }}:scan-${{ inputs.IMAGE_TAG }} \
-          --tag ${{ steps.ecr_repo.outputs.repository-uri }}:pr-${{ github.event.pull_request.number }} \
           --tag ${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}
