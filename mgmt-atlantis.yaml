@@ -1,0 +1,13 @@
+version: 2
+parallel_plan: false
+parallel_apply: false
+
+projects:
+
+- dir: terraform/ecr
+  workspace: default
+  autoplan:
+    when_modified:
+    - "*.tf"
+  workflow: mgmt
+
