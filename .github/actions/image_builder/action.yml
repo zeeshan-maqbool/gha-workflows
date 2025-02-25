@@ -66,6 +66,14 @@ inputs:
     description: 'Use AWS role chaining'
     required: false
     default: 'true'
+  PR_ENVIRONMENT:
+    description: 'Create PR environment comment'
+    required: false
+    default: 'false'
+  PR_ENVIRONMENT_URL_TEMPLATE:
+    description: 'URL template for PR environment comment'
+    required: false
+    default: 'https://buildkite-node-app-${PR_NUMBER}.dev.devops.2u.com'
 
 runs:
   using: "composite"
@@ -210,3 +218,44 @@ runs:
         docker buildx imagetools create \
           ${{ steps.ecr_repo.outputs.repository-uri }}:scan-${{ inputs.IMAGE_TAG }} \
           --tag ${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}
+
+    - name: pr-environment
+      if: |
+        !startsWith(github.head_ref, 'promote-') &&
+        !startsWith(github.head_ref, 'release-please') && 
+        inputs.PR_ENVIRONMENT
+      uses: actions/github-script@v6
+      with:
+        script: |
+          await github.rest.issues.addLabels({
+            ...context.repo,
+            issue_number: context.issue.number,
+            labels: ['preview']
+          });
+
+          // Replace placeholder in URL template
+          const urlTemplate = '${{ inputs.PR_ENVIRONMENT_URL_TEMPLATE }}';
+          const previewUrl = urlTemplate.replace('${PR_NUMBER}', context.issue.number);
+
+          const commentText = `Preview environment will be available @ ${previewUrl}`;
+          const searchPhrase = "Preview environment will be";
+
+          // Get existing comments first
+          const comments = await github.rest.issues.listComments({
+            ...context.repo,
+            issue_number: context.issue.number
+          });
+
+          // Check if any comment contains our search phrase
+          const existingComment = comments.data.find(c => c.body.includes(searchPhrase));
+
+          if (existingComment) {
+            console.log('Found existing preview environment comment with ID:', existingComment.id);
+          } else {
+            console.log('No matching preview environment comment found, creating new one');
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: commentText
+            });
+          }
