@@ -236,6 +236,7 @@ runs:
           // Replace placeholder in URL template
           const urlTemplate = '${{ inputs.PR_ENVIRONMENT_URL_TEMPLATE }}';
           const previewUrl = urlTemplate.replace('${PR_NUMBER}', context.issue.number);
+          console.log('Preview URL:', previewUrl);
 
           const commentText = `Preview environment will be available @ ${previewUrl}`;
           const searchPhrase = "Preview environment will be";
