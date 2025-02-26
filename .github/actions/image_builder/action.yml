@@ -66,14 +66,6 @@ inputs:
     description: 'Use AWS role chaining'
     required: false
     default: 'true'
-  PR_ENVIRONMENT:
-    description: 'Create PR environment comment'
-    required: false
-    default: 'false'
-  PR_ENVIRONMENT_URL_TEMPLATE:
-    description: 'URL template for PR environment comment'
-    required: false
-    default: 'https://buildkite-node-app-${PR_NUMBER}.dev.devops.2u.com'
 
 runs:
   using: "composite"
