@@ -105,13 +105,14 @@ runs:
           done
 
           # 4. Validate template syntax
-          for env in "${ENVIRONMENTS[@]}"; do
-            echo "Validating Helm template syntax in ${env} environment"
-            if ! helm template "test-release" "${{ inputs.HELM_DIR }}/${env}" --debug > /dev/null 2>&1; then
-              echo "::error::Helm template validation failed for ${env} environment"
-              HAS_ERROR=1
-            fi
-          done
+          # TODO needs ability to access add private repo as helm registry
+          #for env in "${ENVIRONMENTS[@]}"; do
+          #  echo "Validating Helm template syntax in ${env} environment"
+          #  if ! helm template "test-release" "${{ inputs.HELM_DIR }}/${env}" --debug > /dev/null 2>&1; then
+          #    echo "::error::Helm template validation failed for ${env} environment"
+          #    HAS_ERROR=1
+          #  fi
+          #done
 
           # 5. Check for orphaned templates in other environments
           for env in "${ENVIRONMENTS[@]}"; do
