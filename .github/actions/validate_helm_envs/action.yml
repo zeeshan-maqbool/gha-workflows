@@ -1,0 +1,138 @@
+name: 'Validate Helm Chart Environments'
+description: 'Validates Helm chart configurations across different environments for consistency'
+
+inputs:
+  HELM_DIR:
+    description: 'Directory containing Helm charts'
+    required: false
+    default: 'helm'
+  SUBCHART_NAME:
+    description: 'Name of the subchart to validate versions for'
+    required: false
+    default: 'web-app'
+  BASE_ENV:
+    description: 'Base environment to compare against'
+    required: false
+    default: 'dev'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate Helm customizations
+      shell: bash
+      run: |
+        # Function to extract value paths from a template
+        extract_value_paths() {
+          local template="$1"
+          grep -o '{{ *\.Values\.custom-templates\.[^}]*' "$template" | \
+            sed 's/{{ *\.Values\.//' | \
+            sed 's/ *}}//' | \
+            sort -u
+        }
+
+        # Function to check if a path exists in values file
+        check_value_path() {
+          local env="$1"
+          local path="$2"
+          if ! yq --yaml-output ".$path" "${{ inputs.HELM_DIR }}/${env}/values.yaml" > /dev/null 2>&1; then
+            echo "::error::Value path '${path}' missing in ${{ inputs.HELM_DIR }}/${env}/values.yaml"
+            return 1
+          fi
+          return 0
+        }
+
+        # Function to get subchart version
+        get_subchart_version() {
+          local env="$1"
+          yq --yaml-output '.dependencies[] | select(.name == "${{ inputs.SUBCHART_NAME }}") | .version' "${{ inputs.HELM_DIR }}/${env}/Chart.yaml"
+        }
+
+        # Get environments from helm directory
+        ENVIRONMENTS=($(ls -d ${{ inputs.HELM_DIR }}/*/ | cut -d'/' -f2))
+        HAS_ERROR=0
+
+        # 1. Validate subchart versions are in sync
+        base_version=$(get_subchart_version "${{ inputs.BASE_ENV }}")
+        if [ -z "$base_version" ] || [ "$base_version" = "null" ]; then
+          echo "::error::Failed to extract ${{ inputs.SUBCHART_NAME }} version from ${{ inputs.BASE_ENV }} environment"
+          HAS_ERROR=1
+        else
+          echo "${{ inputs.BASE_ENV }} ${{ inputs.SUBCHART_NAME }} subchart version: ${base_version}"
+        fi
+        
+        for env in "${ENVIRONMENTS[@]}"; do
+          if [ "$env" != "${{ inputs.BASE_ENV }}" ]; then
+            env_version=$(get_subchart_version "$env")
+            if [ "$base_version" != "$env_version" ]; then
+              echo "::error::${{ inputs.SUBCHART_NAME }} subchart version mismatch in ${env} environment. ${{ inputs.BASE_ENV }}: ${base_version}, ${env}: ${env_version}"
+              HAS_ERROR=1
+            fi
+          fi
+        done
+
+        # Only proceed if custom templates exist in base environment
+        if [ -d "${{ inputs.HELM_DIR }}/${{ inputs.BASE_ENV }}/templates" ] && [ "$(ls -A ${{ inputs.HELM_DIR }}/${{ inputs.BASE_ENV }}/templates)" ]; then
+          echo "Found custom templates in ${{ inputs.BASE_ENV }} environment. Validating..."
+
+          # 2. Validate template presence across environments
+          for template in ${{ inputs.HELM_DIR }}/${{ inputs.BASE_ENV }}/templates/*; do
+            if [ -f "$template" ]; then
+              template_name=$(basename "$template")
+              echo "Checking template: ${template_name}"
+
+              for env in "${ENVIRONMENTS[@]}"; do
+                if [ ! -f "${{ inputs.HELM_DIR }}/${env}/templates/${template_name}" ]; then
+                  echo "::error::Template ${template_name} missing in ${env} environment"
+                  HAS_ERROR=1
+                fi
+              done
+
+              # 3. Extract and validate custom-templates value paths
+              while IFS= read -r value_path; do
+                if [[ "$value_path" == custom-templates* ]]; then
+                  echo "Checking value path: ${value_path}"
+                  for env in "${ENVIRONMENTS[@]}"; do
+                    if ! check_value_path "$env" "$value_path"; then
+                      HAS_ERROR=1
+                    fi
+                  done
+                else
+                  echo "::error::Template ${template_name} references values outside of custom-templates: ${value_path}"
+                  HAS_ERROR=1
+                fi
+              done < <(extract_value_paths "$template")
+            fi
+          done
+
+          # 4. Validate template syntax
+          for env in "${ENVIRONMENTS[@]}"; do
+            echo "Validating Helm template syntax in ${env} environment"
+            if ! helm template "test-release" "${{ inputs.HELM_DIR }}/${env}" --debug > /dev/null 2>&1; then
+              echo "::error::Helm template validation failed for ${env} environment"
+              HAS_ERROR=1
+            fi
+          done
+
+          # 5. Check for orphaned templates in other environments
+          for env in "${ENVIRONMENTS[@]}"; do
+            if [ "$env" != "${{ inputs.BASE_ENV }}" ] && [ -d "${{ inputs.HELM_DIR }}/${env}/templates" ]; then
+              for template in "${{ inputs.HELM_DIR }}/${env}/templates/"*; do
+                if [ -f "$template" ]; then
+                  template_name=$(basename "$template")
+                  if [ ! -f "${{ inputs.HELM_DIR }}/${{ inputs.BASE_ENV }}/templates/${template_name}" ]; then
+                    echo "::error::Orphaned template ${template_name} found in ${env} environment"
+                    HAS_ERROR=1
+                  fi
+                fi
+              done
+            fi
+          done
+        fi
+
+        # Exit with error if any checks failed
+        if [ $HAS_ERROR -eq 1 ]; then
+          echo "::error::Validation failed. Please fix the above errors."
+          exit 1
+        fi
+
+        echo "All validations passed successfully!"
