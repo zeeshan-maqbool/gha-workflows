@@ -1,0 +1,57 @@
+name: Promote Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_env:
+        description: 'Source environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          - prod
+      target_env:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          - prod
+      version:
+        description: 'Version to promote'
+        required: true
+        type: string
+      app_id:
+        description: 'GitHub App ID for token generation (optional)'
+        required: false
+        type: string
+      private_key:
+        description: 'GitHub App private key for token generation (optional)'
+        required: false
+        type: string
+
+jobs:
+  promote:
+    runs-on: 2uinc-mgmt
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Promote Release
+        uses: ./.github/actions/promote_release
+        id: promote
+        with:
+          source_env: ${{ inputs.source_env }}
+          target_env: ${{ inputs.target_env }}
+          version: ${{ inputs.version }}
+          app_id: ${{ inputs.app_id != '' && inputs.app_id || vars.GITOPS_BOT_APP_ID }}
+          private_key: ${{ inputs.private_key != '' && inputs.private_key || secrets.GITOPS_BOT_PRIVATE_KEY }}
+          
+      - name: Print PR URL
+        run: |
+          echo "Created PR: ${{ steps.promote.outputs.pr_url }}"
