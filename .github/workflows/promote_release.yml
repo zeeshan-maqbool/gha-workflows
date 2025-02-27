@@ -29,6 +29,21 @@ on:
         required: false
         type: string
         default: '2uinc-mgmt'
+      auto_deploy_environments:
+        description: 'Comma-separated list of environments to enable auto-approve and deploy for'
+        required: false
+        type: string
+        default: 'stg'
+      enable_auto_deploy:
+        description: 'Enable auto-approve and deploy functionality'
+        required: false
+        type: boolean
+        default: true
+      merge_type:
+        description: 'Type of merge to perform (merge, rebase, or squash)'
+        required: false
+        type: string
+        default: 'squash'
     secrets:
       private_key:
         description: 'GitHub App private key for token generation (required)'
@@ -48,8 +63,8 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      pr_url: ${{ steps.create-pr.outputs.pull-request-url }}
-      pr_number: ${{ steps.create-pr.outputs.pull-request-number }}
+      pr_url: ${{ steps.create-pr.outputs.url }}
+      pr_number: ${{ steps.create-pr.outputs.number }}
     
     steps:
       - uses: actions/checkout@v4
@@ -57,13 +72,11 @@ jobs:
       - name: Check version exists in source
         id: check-version
         run: |
-          # Python yq uses jq syntax and pipes YAML to jq
           SOURCE_ENV="${{ inputs.source_env }}"
           SOURCE_VERSION=$(yq -r ".apps[] | select(.env == \"$SOURCE_ENV\") | .revision" ${{ inputs.gitops_file }})
           echo "Source environment: $SOURCE_VERSION"
           TARGET_VERSION="${{ inputs.version }}"
 
-          # Check if version exists in source environment
           if [ "$SOURCE_VERSION" = "$TARGET_VERSION" ]; then
             echo "Version $TARGET_VERSION found in ${{ inputs.source_env }}"
             echo "valid=true" >> $GITHUB_OUTPUT
@@ -79,39 +92,93 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.private_key}}
 
-      - name: Update GitOps and Helm configs
+      - name: Configure Git
         run: |
-          # Python yq uses jq syntax
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push changes
+        id: create-pr
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          MERGE_TYPE: ${{ inputs.merge_type }}
+        run: |
+          # Validate merge type
+          if [[ ! "$MERGE_TYPE" =~ ^(merge|rebase|squash)$ ]]; then
+            echo "Error: Invalid merge type '$MERGE_TYPE'. Must be 'merge', 'rebase', or 'squash'"
+            exit 1
+          fi
+
+          # Set up branch name and PR details
+          BRANCH_NAME="promote-${{ inputs.version }}-to-${{ inputs.target_env }}"
+          PR_TITLE="chore: promote version ${{ inputs.version }} to ${{ inputs.target_env }}"
+
+          # Create and switch to new branch
+          git checkout -b "$BRANCH_NAME"
+
+          # Update the GitOps file
           TARGET_ENV="${{ inputs.target_env }}"
           TARGET_VERSION="${{ inputs.version }}"
-
-          # Update the revision field for the matching environment directly in place
           yq -y --in-place ".apps |= map(if .env == \"$TARGET_ENV\" then .revision = \"$TARGET_VERSION\" else . end)" \
             ${{ inputs.gitops_file }}
 
-      - name: Create Pull Request
-        id: create-pr
-        uses: peter-evans/create-pull-request@v5
-        with:
-          token: ${{ steps.generate-token.outputs.token }}
-          commit-message: 'chore: promote version ${{ inputs.version }} to ${{ inputs.target_env }}'
-          title: 'chore: promote version ${{ inputs.version }} to ${{ inputs.target_env }}'
-          body: |
-            Promoting version ${{ inputs.version }} from ${{ inputs.source_env }} to ${{ inputs.target_env }}
+          # Commit and push changes
+          git add ${{ inputs.gitops_file }}
+          git commit -m "$PR_TITLE"
+          git push origin "$BRANCH_NAME"
+
+          gh label create "promotion" --color "0E8A16" --description "Pull requests for promotions" || true
+          gh label create "env/${{ inputs.source_env }}-to-${{ inputs.target_env }}" --color "FBCA04" \
+            --description "Pull requests for promotions from ${{ inputs.source_env }} to ${{ inputs.target_env }}" || true
+          gh label create "version/${{ inputs.version }}" --color "1D76DB" \
+            --description "Pull requests for promotions of version ${{ inputs.version }}" || true
+
+          # Create PR and capture outputs
+          PR_URL=$(gh pr create \
+            --title "$PR_TITLE" \
+            --body "Promoting version ${{ inputs.version }} from ${{ inputs.source_env }} to ${{ inputs.target_env }}
 
             ## Promotion Details
             - Source: ${{ inputs.source_env }}
             - Target: ${{ inputs.target_env }}
             - Version: ${{ inputs.version }}
 
-            This PR was automatically generated by the promotion workflow.
-          branch: promote-${{ inputs.version }}-to-${{ inputs.target_env }}
-          labels: |
-            promotion
-            env/${{ inputs.source_env }}-to-${{ inputs.target_env }}
-            version/${{ inputs.version }}
-          delete-branch: true
-          
+            This PR was automatically generated by the promotion workflow." \
+            --label "promotion" \
+            --label "env/${{ inputs.source_env }}-to-${{ inputs.target_env }}" \
+            --label "version/${{ inputs.version }}")
+
+          PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]*$')
+          echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
       - name: Print PR URL
         run: |
-          echo "Created PR: ${{ steps.create-pr.outputs.pull-request-url }}"
+          echo "Created PR: ${{ steps.create-pr.outputs.url }}"
+
+  auto-deploy:
+    needs: promote
+    if: inputs.enable_auto_deploy == true
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      pull-requests: write
+      contents: write
+    steps:
+      - name: Check if auto-deploy is enabled for environment
+        id: check-auto-deploy
+        run: |
+          IFS=',' read -ra AUTO_DEPLOY_ENVS <<< "${{ inputs.auto_deploy_environments }}"
+          for env in "${AUTO_DEPLOY_ENVS[@]}"; do
+            if [ "${env// /}" = "${{ inputs.target_env }}" ]; then
+              echo "enabled=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+          echo "enabled=false" >> $GITHUB_OUTPUT
+
+      - name: Auto-approve PR
+        if: steps.check-auto-deploy.outputs.enabled == 'true'
+        run: |
+          gh pr review ${{ needs.promote.outputs.pr_number }} --repo ${{ github.repository }} --approve -b "Auto-approving ${{ inputs.target_env }} promotion"
+          gh pr merge ${{ needs.promote.outputs.pr_number }} --auto --repo ${{ github.repository }} --${{inputs.merge_type}}
+        env:
+          GH_TOKEN: ${{ github.token }}
