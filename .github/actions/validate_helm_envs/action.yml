@@ -48,7 +48,7 @@ runs:
         }
 
         # Get environments from helm directory
-        ENVIRONMENTS=($(ls -d ${{ inputs.HELM_DIR }}/*/ | cut -d'/' -f2))
+        ENVIRONMENTS=($(ls ${{ inputs.HELM_DIR }}/ ))
         HAS_ERROR=0
 
         echo "Found environments: ${ENVIRONMENTS[*]}"
