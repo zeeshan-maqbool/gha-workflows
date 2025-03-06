@@ -66,10 +66,27 @@ inputs:
     description: 'Use AWS role chaining'
     required: false
     default: 'true'
+  CANCEL_PREVIOUS:
+    description: 'Cancel previous running builds of this workflow'
+    required: false
+    default: 'true'
+  CONCURRENCY_GROUP:
+    description: 'Concurrency group for cancelling previous runs (leave empty to use default)'
+    required: false
+    default: ''
 
 runs:
   using: "composite"
   steps:
+    - name: Cancel Previous Runs
+      if: inputs.CANCEL_PREVIOUS == 'true'
+      uses: styfle/cancel-workflow-action@0.12.0
+      with:
+        access_token: ${{ github.token }}
+        workflow_id: ${{ github.workflow }}
+        # Use custom concurrency group if provided, otherwise default to branch-specific
+        concurrency_group: ${{ inputs.CONCURRENCY_GROUP || format('{0}-{1}', github.workflow, github.ref) }}
+
     - name: Check repository secrets
       id: check-secrets
       shell: bash
