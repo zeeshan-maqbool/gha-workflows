@@ -9,7 +9,7 @@ inputs:
     description: 'AWS region for ECR'
     required: true
   AWS_ACCOUNT_NAME:
-    description: 'AWS account name'
+    description: 'AWS account from which to pull ECR, e.g. degrees-prod, execed-prod, opencourses-prod'
     required: false
     default: 'corp-delivery-prod'
   REPO_NAME:
@@ -147,7 +147,7 @@ runs:
       id: ecr_repo
       with:
         repository: ${{ inputs.REPO_NAME }}
-        repository-policy: ${{ inputs.REPO_POLICY }}
+        repository-policy: ${{ inputs.REPO_POLICY || format('{0}-ecr-repo-policy.json', inputs.AWS_ACCOUNT_NAME) }}
         lifecycle-policy: ${{ inputs.LIFECYCLE_POLICY_FILE || 'default-ecr-lifecycle-policy.json' }}
 
     - name: Set up QEMU

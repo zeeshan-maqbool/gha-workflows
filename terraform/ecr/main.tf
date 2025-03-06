@@ -6,25 +6,22 @@ terraform {
     dynamodb_table = "mgmt-terraform"
   }
   required_version = "1.9.5"
-  #   required_providers {
-  #     aws = {
-  #       source = "hashicorp/aws"
-  #     }
-  #     datadog = {
-  #       source = "datadog/datadog"
-  #     }
-  #     github = {
-  #       source  = "integrations/github"
-  #       version = "6.2.2"
-  #     }
-  #     kubernetes = {
-  #       source = "hashicorp/kubernetes"
-  #     }
-  #     kustomization = {
-  #       source = "kbst/kustomization"
-  #     }
-  #     castai = {
-  #       source = "castai/castai"
-  #     }
-  #   }
+}
+
+provider "aws" {
+  region = "us-west-2"
+  alias = "org"
+
+  assume_role {
+    role_arn = "arn:aws:iam::205163962854:role/atlantis-sre"
+  }
+
+  default_tags {
+    tags = {
+      source       = "2uinc/gha-workflows/ecr"
+      group        = "sre"
+      businessunit = "SRE-Global"
+      env          = terraform.workspace
+    }
+  }
 }
