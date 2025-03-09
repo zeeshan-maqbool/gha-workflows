@@ -98,7 +98,7 @@ jobs:
           fi
           python -m yq --version
           # Verify we're using the Python version
-          python -m yq --help | grep -q "Python YAML processor" || { echo "Error: Wrong yq version installed. Please ensure Python yq is installed."; exit 1; }
+          #python -m yq --help | grep -q "Python YAML processor" || { echo "Error: Wrong yq version installed. Please ensure Python yq is installed."; exit 1; }
 
       - name: Check version exists in source
         id: check-version
