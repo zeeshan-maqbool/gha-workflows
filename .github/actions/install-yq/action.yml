@@ -1,0 +1,48 @@
+name: 'Install yq'
+description: 'Installs Python-based yq utility and verifies the installation. This action specifically installs the Python version of yq, not the Go-based version. This is so we can use both jq and yq queries interchangeably; the python yq uses jq-like syntax.'
+
+inputs:
+  version:
+    description: 'Specific version of Python yq to install (omit to install latest)'
+    required: false
+    default: ''
+  install_command:
+    description: 'Custom installation command if needed (defaults to pip install)'
+    required: false
+    default: 'pip install'
+
+outputs:
+  yq_version:
+    description: 'Installed version of yq'
+    value: ${{ steps.verify-yq.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install and verify Python yq
+      id: install-yq
+      shell: bash
+      run: |
+        # Check if Python yq is installed, install if not
+        if ! command -v yq &> /dev/null || ! yq --help 2>&1 | grep -q "https://github.com/kislyuk/yq"; then
+          echo "Installing Python yq..."
+          VERSION_ARG="${{ inputs.version }}"
+          if [ -n "$VERSION_ARG" ]; then
+            ${{ inputs.install_command }} yq==$VERSION_ARG
+          else
+            ${{ inputs.install_command }} yq
+          fi
+        fi
+
+    - name: Verify yq installation
+      id: verify-yq
+      shell: bash
+      run: |
+        # Display version
+        YQ_VERSION=$(pip show yq | grep -i version | awk '{print $2}')
+        echo "version=$YQ_VERSION" >> $GITHUB_OUTPUT
+        echo "Installed yq version: $YQ_VERSION"
+
+        # Verify we're using the Python version
+        yq --help | grep -q "https://github.com/kislyuk/yq" || { echo "Error: Wrong yq version installed. Please ensure Python yq is installed."; exit 1; }
+        echo "✅ Successfully verified Python yq installation"

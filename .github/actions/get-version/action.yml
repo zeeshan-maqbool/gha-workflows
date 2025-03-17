@@ -1,0 +1,62 @@
+name: 'Get Version'
+description: 'Extracts version from a Release-Please-Style Pull Request title (last word in title) or generates version from PR number for non-release PRs'
+
+inputs:
+  pr_title:
+    description: 'Pull request title to extract version from (defaults to current PR title)'
+    required: false
+    default: ${{ github.event.pull_request.title }}
+  pr_number:
+    description: 'Pull request number to use if no release version is found (defaults to current PR number)'
+    required: false
+    default: ${{ github.event.pull_request.number }}
+  pr_labels:
+    description: 'JSON array of pull request labels (defaults to current PR labels)'
+    required: false
+    default: ${{ toJSON(github.event.pull_request.labels) }}
+  release_label:
+    description: 'Label that indicates a release PR (for Release Please)'
+    required: false
+    default: 'autorelease: pending'
+  prefix:
+    description: 'Prefix to add to PR-based versions (only applies to non-release versions)'
+    required: false
+    default: 'pr-'
+
+outputs:
+  tag:
+    description: 'The extracted or generated version tag'
+    value: ${{ steps.extract-version.outputs.tag }}
+  is_release:
+    description: 'Boolean indicating if this is a release PR (true) or a regular PR (false)'
+    value: ${{ steps.extract-version.outputs.is_release }}
+  raw_version:
+    description: 'The raw extracted version without any modifications'
+    value: ${{ steps.extract-version.outputs.raw_version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Extract version
+      id: extract-version
+      shell: bash
+      run: |
+        echo "PR Labels: ${{ inputs.pr_labels }}"
+        echo "PR Title: ${{ inputs.pr_title }}"
+
+        # Parse labels JSON and check for release label
+        if echo '${{ inputs.pr_labels }}' | jq -e '.[] | select(.name == "${{ inputs.release_label }}")' > /dev/null; then
+          echo "Found release label: ${{ inputs.release_label }}"
+          VERSION=$(echo "${{ inputs.pr_title }}" | awk '{print $NF}')
+          echo "Extracted version: $VERSION"
+          echo "is_release=true" >> $GITHUB_OUTPUT
+          echo "raw_version=$VERSION" >> $GITHUB_OUTPUT
+        else
+          echo "No release label found"
+          VERSION="${{ inputs.prefix }}${{ inputs.pr_number }}"
+          echo "Using PR number: $VERSION"
+          echo "is_release=false" >> $GITHUB_OUTPUT
+          echo "raw_version=${{ inputs.pr_number }}" >> $GITHUB_OUTPUT
+        fi
+
+        echo "tag=$VERSION" >> $GITHUB_OUTPUT

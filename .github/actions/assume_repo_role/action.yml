@@ -1,11 +1,13 @@
 name: 'Assume Repo Role'
+description: 'Assumes an AWS IAM role based on repository name, configuring AWS credentials for subsequent workflow steps'
+
 inputs:
   AWS_REGION:
-    description: 'The AWS region to use'
+    description: 'The AWS region to use for all AWS API calls'
     required: true
     default: 'us-east-1'
   AWS_ACCOUNT_NAME:
-    description: 'AWS Account name to deploy to'
+    description: 'AWS Account identifier to deploy to, used to look up appropriate role ARN in secrets'
     required: false
     default: 'corp-delivery-prod'
 
@@ -44,4 +46,3 @@ runs:
         mask-aws-account-id: false
         role-chaining: true
         role-skip-session-tagging: true
-

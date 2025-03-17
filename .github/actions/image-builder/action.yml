@@ -1,92 +1,92 @@
 name: 'Image Builder'
-description: 'Builds and pushes Docker images to ECR with security scanning'
+description: 'Builds and pushes Docker images to ECR with security scanning. Manages repository creation, vulnerability scanning, and image tagging.'
 
 inputs:
   RUNS_ON:
-    description: 'Runner to use for the job'
+    description: 'GitHub runner to use for the job'
     required: true
   AWS_REGION:
-    description: 'AWS region for ECR'
+    description: 'AWS region for ECR repository and AWS API calls'
     required: true
   AWS_ACCOUNT_NAME:
-    description: 'AWS account from which to pull ECR, e.g. degrees-prod, execed-prod, opencourses-prod'
+    description: 'AWS account from which to pull ECR credentials, e.g. degrees-prod, execed-prod, opencourses-prod'
     required: false
     default: 'corp-delivery-prod'
   REPO_NAME:
-    description: 'ECR repository name'
+    description: 'ECR repository name where the image will be stored'
     required: true
   REPO_POLICY:
-    description: 'ECR repository policy'
+    description: 'ECR repository policy file or JSON string to apply to the repository'
     required: false
   LIFECYCLE_POLICY_FILE:
-    description: 'ECR lifecycle policy file'
+    description: 'ECR lifecycle policy JSON file to apply to the repository'
     required: false
   CONTEXT:
-    description: 'Docker build context'
+    description: 'Docker build context directory'
     required: false
     default: '.'
   IMAGE_FILE:
-    description: 'Dockerfile path'
+    description: 'Path to the Dockerfile relative to the context'
     required: false
     default: 'Dockerfile'
   IMAGE_TAG:
-    description: 'Image tag'
+    description: 'Image tag to apply to the built image'
     required: true
   BUILD_SECRETS_NAME:
-    description: 'AWS Secrets Manager secret name'
+    description: 'AWS Secrets Manager secret name to load as build environment variables'
     required: false
   BUILD_SECRETS_OUTPUT_PATH:
-    description: 'Path to output secrets'
+    description: 'Path to output secrets file'
     required: false
   BUILD_ARGS:
-    description: 'Docker build arguments'
+    description: 'Docker build arguments in the format ARG=value,ARG2=value2'
     required: false
     default: ''
   PLATFORMS:
-    description: 'Build platforms'
+    description: 'Build platforms in Docker format (e.g., linux/amd64,linux/arm64)'
     required: false
     default: 'linux/amd64'
   PUSH_IMAGE:
-    description: 'Whether to push the final image'
+    description: 'Whether to push the final image (true) or just the scan image (false)'
     required: false
     default: 'false'
   CHECKOUT_SUBMODULES:
-    description: 'Checkout submodules strategy'
+    description: 'Checkout submodules strategy (true, recursive, or empty for no submodules)'
     required: false
     default: ''
   ALLOW_VULNERABILITIES:
-    description: 'Allow vulnerabilities in scan'
+    description: 'Allow vulnerabilities in scan and continue even if critical vulnerabilities are found'
     required: false
     default: 'false'
   SKIP_SESSION_TAGGING:
-    description: 'Skip AWS session tagging'
+    description: 'Skip AWS session tagging for assumed role'
     required: false
     default: 'true'
   USE_ROLE_CHAINING:
-    description: 'Use AWS role chaining'
+    description: 'Use AWS role chaining for credential management'
     required: false
     default: 'true'
-  CANCEL_PREVIOUS:
-    description: 'Cancel previous running builds of this workflow'
+  ACTIONS_RUNNER_APP_ID:
+    description: 'GitHub App ID for generating tokens for private repo access'
     required: false
-    default: 'true'
-  CONCURRENCY_GROUP:
-    description: 'Concurrency group for cancelling previous runs (leave empty to use default)'
+  ACTIONS_RUNNER_PRIVATE_KEY:
+    description: 'GitHub App private key for generating tokens for private repo access'
     required: false
-    default: ''
+
+outputs:
+  image_uri:
+    description: 'The full URI of the built image including repository and tag'
+    value: ${{ steps.set-outputs.outputs.image_uri }}
+  repository_uri:
+    description: 'The ECR repository URI without the tag'
+    value: ${{ steps.ecr_repo.outputs.repository-uri }}
+  image_digest:
+    description: 'The content-addressable digest of the built image'
+    value: ${{ steps.set-outputs.outputs.image_digest }}
 
 runs:
   using: "composite"
   steps:
-    - name: Cancel Previous Runs
-      if: inputs.CANCEL_PREVIOUS == 'true'
-      uses: styfle/cancel-workflow-action@0.12.0
-      with:
-        access_token: ${{ github.token }}
-        workflow_id: ${{ github.workflow }}
-        # Use custom concurrency group if provided, otherwise default to branch-specific
-        concurrency_group: ${{ inputs.CONCURRENCY_GROUP || format('{0}-{1}', github.workflow, github.ref) }}
-
     - name: Check repository secrets
       id: check-secrets
       shell: bash
@@ -227,3 +227,16 @@ runs:
         docker buildx imagetools create \
           ${{ steps.ecr_repo.outputs.repository-uri }}:scan-${{ inputs.IMAGE_TAG }} \
           --tag ${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}
+
+    - name: Set outputs
+      id: set-outputs
+      shell: bash
+      run: |
+        if ${{ inputs.PUSH_IMAGE }}; then
+          echo "image_uri=${{ steps.ecr_repo.outputs.repository-uri }}:${{ inputs.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+        else
+          echo "image_uri=${{ steps.ecr_repo.outputs.repository-uri }}:scan-${{ inputs.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+        fi
+        # Get image digest
+        DIGEST=$(aws ecr describe-images --repository-name ${{ inputs.REPO_NAME }} --image-ids imageTag=${{ inputs.IMAGE_TAG }} --query 'imageDetails[0].imageDigest' --output text)
+        echo "image_digest=$DIGEST" >> $GITHUB_OUTPUT

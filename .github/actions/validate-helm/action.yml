@@ -1,0 +1,381 @@
+name: 'Validate Helm Chart Environments'
+description: 'Validates Helm chart configurations across different environments, including dependency resolution and template rendering'
+
+inputs:
+  REPO_PATH:
+    description: 'Path to the Helm chart repository (e.g., helm or services/myapp/helm)'
+    required: true
+  APP_NAME:
+    description: 'Application name to validate (if not provided, will be determined from REPO_PATH)'
+    required: false
+  GITOPS_FILE:
+    description: 'Path to gitops configuration file containing app deployment configurations'
+    required: false
+    default: 'gitops.yaml'
+  SHARED_VALUES:
+    description: 'Override the sharedValues from gitops.yaml (path relative to REPO_PATH)'
+    required: false
+  ENV:
+    description: 'Environment identifier to validate (e.g., dev, stg, prd)'
+    required: false
+  ENV_VALUES:
+    description: 'Override the environment-specific values file name (path relative to REPO_PATH)'
+    required: false
+  GH_APP_ID:
+    description: 'GitHub App ID for authentication (required if using private helm dependencies)'
+    required: false
+  GH_APP_PRIVATE_KEY:
+    description: 'GitHub App private key for authentication (required if using private helm dependencies)'
+    required: false
+  DEBUG:
+    description: 'Enable debug output for helm commands'
+    required: false
+    default: 'false'
+
+outputs:
+  app_name:
+    description: 'The validated application name'
+    value: ${{ steps.determine-app.outputs.APP_NAME }}
+  environments:
+    description: 'JSON array of validated environments'
+    value: ${{ steps.summarize.outputs.environments }}
+  validation_result:
+    description: 'Result of the validation (success or failure)'
+    value: ${{ steps.summarize.outputs.result }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install yq
+      uses: 2uinc/gha-workflows/.github/actions/install-yq@main
+
+    - name: Determine APP_NAME
+      id: determine-app
+      shell: bash
+      run: |
+        if [ ! -f "${{ inputs.GITOPS_FILE }}" ]; then
+          echo "::error::Gitops file not found: ${{ inputs.GITOPS_FILE }}"
+          exit 1
+        fi
+
+        if [ -n "${{ inputs.APP_NAME }}" ]; then
+          # Verify the provided APP_NAME exists in gitops.yaml
+          APP_EXISTS=$(yq -r ".apps[] | select(.name == \"${{ inputs.APP_NAME }}\") | .name" "${{ inputs.GITOPS_FILE }}" | head -n1)
+          if [ -z "$APP_EXISTS" ]; then
+            echo "::error::Provided APP_NAME '${{ inputs.APP_NAME }}' not found in ${{ inputs.GITOPS_FILE }}"
+            exit 1
+          fi
+          echo "✅ Using provided APP_NAME: ${{ inputs.APP_NAME }}"
+          echo "APP_NAME=${{ inputs.APP_NAME }}" >> $GITHUB_OUTPUT
+        else
+          # Find the app name that matches the provided REPO_PATH
+          APP_NAME=$(yq -r ".apps[] | select(.repoPath == \"${{ inputs.REPO_PATH }}\") | .name" "${{ inputs.GITOPS_FILE }}" | head -n1)
+
+          if [ -z "$APP_NAME" ]; then
+            echo "::error::Could not determine APP_NAME from REPO_PATH: ${{ inputs.REPO_PATH }}"
+            exit 1
+          fi
+
+          echo "✅ Determined APP_NAME from REPO_PATH: $APP_NAME"
+          echo "APP_NAME=$APP_NAME" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check for private dependencies
+      id: check-private-deps
+      shell: bash
+      run: |
+        has_private_deps() {
+          local chart_yaml="$1/Chart.yaml"
+          if [ ! -f "$chart_yaml" ]; then
+            return 1
+          fi
+          local has_private=$(yq -r '[.dependencies[].repository | test("^https://raw.githubusercontent.")] | any' "$chart_yaml")
+          [ "$has_private" = "true" ]
+        }
+
+        if has_private_deps ${{ inputs.REPO_PATH }}; then
+          if [ -z "${{ inputs.GH_APP_ID }}" ] || [ -z "${{ inputs.GH_APP_PRIVATE_KEY }}" ]; then
+            echo "::error::Private helm dependencies found but GH_APP_ID or GH_APP_PRIVATE_KEY not provided"
+            exit 1
+          fi
+          echo "has_private_deps=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_private_deps=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Generate GitHub token
+      if: steps.check-private-deps.outputs.has_private_deps == 'true'
+      uses: actions/create-github-app-token@v1
+      id: generate-token
+      with:
+        app-id: ${{ inputs.GH_APP_ID }}
+        private-key: ${{ inputs.GH_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+        repositories: |
+          helm-charts
+
+    - name: Validate Helm Chart
+      id: validate-helm
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.check-private-deps.outputs.has_private_deps == 'true' && steps.generate-token.outputs.token || '' }}
+      run: |
+        set -e
+
+        # Global error flag to track validation failures across all environments
+        HAS_ERROR=0
+        VALIDATED_ENVS="[]"
+
+        # Logs an error message in GitHub Actions format and sets the error flag
+        log_error() {
+          echo "::error::$1"
+          HAS_ERROR=1
+        }
+
+        # Extracts application configuration from gitops file for the specified app
+        get_app_config() {
+          local app_name="$1"
+          yq -r ".apps[] | select(.name == \"$app_name\")" "${{ inputs.GITOPS_FILE }}"
+        }
+
+        # Returns a sorted list of unique environments defined for the specified app
+        get_app_environments() {
+          local app_name="$1"
+          yq -r ".apps[] | select(.name == \"$app_name\") | .env" "${{ inputs.GITOPS_FILE }}" | sort -u
+        }
+
+        # Retrieves a specific field value from the gitops file for an app in a given environment
+        get_app_env_field() {
+          local app_name="$1"
+          local env_name="$2"
+          local field="$3"
+          yq -r ".apps[] | select(.name == \"$app_name\" and .env == \"$env_name\") | .$field" "${{ inputs.GITOPS_FILE }}"
+        }
+
+        # Validates that a values file exists at the specified path
+        validate_values_file() {
+          local repo_path="$1"
+          local values_file="$2"
+          local full_path="${repo_path}/${values_file}"
+          
+          if [ ! -f "$full_path" ]; then
+            log_error "Values file not found: $full_path"
+            return 1
+          else
+            echo "✅ Values file validated: $full_path"
+            return 0
+          fi
+        }
+
+        # Configures private Helm repositories using GitHub token authentication
+        # Extracts repository URLs from Chart.yaml and adds them to Helm
+        add_private_helm_repos() {
+          local chart_yaml="$1/Chart.yaml"
+          if [ ! -f "$chart_yaml" ]; then
+            return 1
+          fi
+
+          # Extract repositories from dependencies
+          local repos=$(yq -r '.dependencies[].repository' "$chart_yaml" | grep '^https://raw.githubusercontent.' || true)
+          if [ -n "$repos" ]; then
+            while IFS= read -r repo; do
+              local repo_name=$(echo "$repo" | sed 's/.*\/\([^/]*\)\/[^/]*$/\1/')
+              echo "Adding private helm repo: $repo_name"
+              if ! helm repo add "$repo_name" "$repo" --username not-used --password "$GH_TOKEN"; then
+                echo "Failed to add helm repo: $repo_name"
+                return 1
+              fi
+            done <<< "$repos"
+          fi
+          return 0
+        }
+
+        # Validates helm template generation for a specific environment
+        validate_helm_template() {
+          local repo_path="$1"
+          local shared_values="$2"
+          local env_values="$3"
+          local env_name="$4"
+          local debug_flag="${5:-""}"
+
+          echo "Validating helm template for environment: $env_name"
+
+          # Construct values file arguments
+          local values_args=""
+          if [ -n "$shared_values" ]; then
+            values_args="$values_args -f $repo_path/$shared_values"
+          fi
+          values_args="$values_args -f $repo_path/$env_values"
+
+          # Run helm template with or without debug output
+          local cmd="helm template \"$repo_path\" $values_args"
+          if [ "$debug_flag" = "--debug" ]; then
+            cmd="$cmd --debug"
+            echo "Running: $cmd"
+          fi
+          
+          if ! eval "$cmd" > /dev/null; then
+            log_error "Helm template validation failed for ${{ steps.determine-app.outputs.APP_NAME }} in environment $env_name"
+            return 1
+          fi
+          
+          return 0
+        }
+
+        # Critical failures that should exit immediately
+        if [ ! -f "${{ inputs.GITOPS_FILE }}" ]; then
+          log_error "Gitops file not found: ${{ inputs.GITOPS_FILE }}"
+          exit 1
+        fi
+
+        # Get app configuration
+        APP_CONFIG=$(get_app_config "${{ steps.determine-app.outputs.APP_NAME }}")
+        if [ -z "$APP_CONFIG" ]; then
+          log_error "App ${{ steps.determine-app.outputs.APP_NAME }} not found in ${{ inputs.GITOPS_FILE }}"
+          exit 1
+        fi
+
+        # Get unique environments for the app
+        if [ -n "${{ inputs.ENV }}" ]; then
+          ENVIRONMENTS="${{ inputs.ENV }}"
+          echo "Using specified environment: $ENVIRONMENTS"
+        else
+          ENVIRONMENTS=$(get_app_environments "${{ steps.determine-app.outputs.APP_NAME }}")
+          if [ -z "$ENVIRONMENTS" ]; then
+            log_error "No environments found for app ${{ steps.determine-app.outputs.APP_NAME }}"
+            exit 1
+          fi
+          echo "Found environments for the app: $ENVIRONMENTS"
+        fi
+
+        # Determine initial repo path for dependency setup
+        INITIAL_REPO_PATH="${{ inputs.REPO_PATH }}"
+        if [ -z "$INITIAL_REPO_PATH" ]; then
+          # Get the first environment's repo path
+          ENV_NAME=$(echo "$ENVIRONMENTS" | head -n1 | tr -d '"')
+          INITIAL_REPO_PATH=$(yq -r ".apps[] | select(.name == \"${{ steps.determine-app.outputs.APP_NAME }}\" and .env == \"$ENV_NAME\") | .repoPath" "${{ inputs.GITOPS_FILE }}")
+          if [ -z "$INITIAL_REPO_PATH" ]; then
+            log_error "repoPath not found for app ${{ steps.determine-app.outputs.APP_NAME }}"
+            exit 1
+          fi
+        fi
+
+        # Set up Helm dependencies once before processing environments
+        if [ -n "$GH_TOKEN" ]; then
+          echo "🔍 Setting up Helm repositories..."
+          if ! add_private_helm_repos "$INITIAL_REPO_PATH"; then
+            log_error "Failed to add Helm repositories"
+            exit 1
+          fi
+
+          echo "🔍 Building helm dependencies..."
+          if ! helm dependency build "$INITIAL_REPO_PATH"; then
+            log_error "Helm dependency build failed for ${{ steps.determine-app.outputs.APP_NAME }}"
+            exit 1
+          fi
+          echo "✅ Helm dependencies built successfully"
+        fi
+
+        # Debug flag based on input
+        DEBUG_FLAG=""
+        if [ "${{ inputs.DEBUG }}" = "true" ]; then
+          DEBUG_FLAG="--debug"
+        fi
+
+        # Store successfully validated environments
+        VALIDATED_ENVIRONMENTS=()
+
+        # Process each environment
+        while IFS= read -r ENV_NAME; do
+          # Remove any surrounding quotes from ENV_NAME
+          ENV_NAME=$(echo "$ENV_NAME" | tr -d '"')
+          echo "🔍 Processing environment: $ENV_NAME"
+          
+          # Determine repo path
+          REPO_PATH="${{ inputs.REPO_PATH }}"
+          if [ -z "$REPO_PATH" ]; then
+            REPO_PATH=$(yq -r ".apps[] | select(.name == \"${{ steps.determine-app.outputs.APP_NAME }}\" and .env == \"$ENV_NAME\") | .repoPath" "${{ inputs.GITOPS_FILE }}")
+            if [ -z "$REPO_PATH" ]; then
+              log_error "repoPath not found for app ${{ steps.determine-app.outputs.APP_NAME }} in environment $ENV_NAME"
+              continue
+            fi
+            echo "✅ Found repoPath: $REPO_PATH"
+          fi
+
+          # Determine shared values file
+          SHARED_VALUES="${{ inputs.SHARED_VALUES }}"
+          if [ -z "$SHARED_VALUES" ]; then
+            SHARED_VALUES=$(yq -r ".apps[] | select(.name == \"${{ steps.determine-app.outputs.APP_NAME }}\" and .env == \"$ENV_NAME\") | .sharedValues" "${{ inputs.GITOPS_FILE }}")
+            if [ -n "$SHARED_VALUES" ]; then
+              echo "✅ Found shared values file: $SHARED_VALUES"
+            fi
+          fi
+
+          # Determine environment values file
+          if [ -n "${{ inputs.ENV_VALUES }}" ]; then
+            ENV_VALUES="${{ inputs.ENV_VALUES }}"
+            echo "✅ Using provided env values file: $ENV_VALUES"
+          else
+            if [ -n "${{ inputs.ENV }}" ]; then
+              ENV_VALUES="${{ inputs.ENV }}-values.yaml"
+              echo "✅ Using user-provided env for values file: $ENV_VALUES"
+            else
+              ENV_VALUES="${ENV_NAME}-values.yaml"
+              echo "✅ Using values file from ${{ inputs.GITOPS_FILE }} file: $ENV_VALUES"
+            fi
+          fi
+
+          # Validate files exist
+          VALIDATION_PASSED=true
+          if [ -n "$SHARED_VALUES" ]; then
+            validate_values_file "$REPO_PATH" "$SHARED_VALUES" || VALIDATION_PASSED=false
+          fi
+          validate_values_file "$REPO_PATH" "$ENV_VALUES" || VALIDATION_PASSED=false
+
+          # Perform helm template validation
+          if [ "$VALIDATION_PASSED" = true ] && [ -n "$GH_TOKEN" ]; then
+            echo "🔍 Building helm dependencies..."
+            if ! helm dependency build "$REPO_PATH"; then
+              log_error "Helm dependency build failed for ${{ steps.determine-app.outputs.APP_NAME }} in environment $ENV_NAME"
+              VALIDATION_PASSED=false
+            else
+              echo "✅ Helm dependencies built successfully"
+              
+              echo "🔍 Validating helm template..."
+              if ! validate_helm_template "$REPO_PATH" "$SHARED_VALUES" "$ENV_VALUES" "$ENV_NAME" "$DEBUG_FLAG"; then
+                VALIDATION_PASSED=false
+              else
+                echo "✅ Helm template validation successful for environment $ENV_NAME"
+              fi
+            fi
+          fi
+          
+          # Add to validated environments if successful
+          if [ "$VALIDATION_PASSED" = true ]; then
+            VALIDATED_ENVIRONMENTS+=("\"$ENV_NAME\"")
+          fi
+
+        done <<< "$ENVIRONMENTS"
+        
+        # Create JSON array of validated environments
+        VALIDATED_ENVS="[$(echo "${VALIDATED_ENVIRONMENTS[@]}" | tr ' ' ',')]"
+        echo "environments=$VALIDATED_ENVS" >> $GITHUB_OUTPUT
+        
+        # Exit with error if any checks failed
+        if [ $HAS_ERROR -eq 1 ]; then
+          echo "❌ Validation failed. Please fix the above errors."
+          exit 1
+        fi
+
+        echo "✅ All validations passed successfully!"
+        
+    - name: Summarize validation
+      id: summarize
+      shell: bash
+      run: |
+        echo "environments=$VALIDATED_ENVS" >> $GITHUB_OUTPUT
+        if [ $? -eq 0 ]; then
+          echo "result=success" >> $GITHUB_OUTPUT
+        else
+          echo "result=failure" >> $GITHUB_OUTPUT
+        fi

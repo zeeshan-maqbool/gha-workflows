@@ -1,4 +1,5 @@
 name: Promote Release
+description: 'Promotes a release to specified environments in a GitOps configuration file'
 
 on:
   workflow_call:
@@ -7,12 +8,8 @@ on:
         description: 'Application name to promote (e.g., buildkite-node-app)'
         required: true
         type: string
-      source_env:
-        description: 'Source environment'
-        required: true
-        type: string
-      target_env:
-        description: 'Target environment'
+      target_envs:
+        description: 'Comma-separated list of target environments (e.g., "dev,stg,prod")'
         required: true
         type: string
       version:
@@ -33,11 +30,6 @@ on:
         required: false
         type: string
         default: '2uinc-mgmt'
-      auto_deploy_environments:
-        description: 'Comma-separated list of environments to enable auto-approve and deploy for'
-        required: false
-        type: string
-        default: 'stg'
       enable_auto_deploy:
         description: 'Enable auto-approve and deploy functionality'
         required: false
@@ -58,6 +50,11 @@ on:
         required: false
         type: string
         default: ''
+      promote_type:
+        description: 'Type of promotion (pull_request or direct_push). Note: direct_push requires enable_auto_deploy=true'
+        required: false
+        type: string
+        default: 'pull_request'
     secrets:
       private_key:
         description: 'GitHub App private key for token generation (required)'
@@ -70,7 +67,7 @@ on:
         description: "Number of the created pull request"
         value: ${{ jobs.promote.outputs.pr_number }}
       version_found:
-        description: "Whether the version was found in the source environment"
+        description: "Whether the version was found in the github releases"
         value: ${{ jobs.promote.outputs.version_found }}
 
 jobs:
@@ -85,82 +82,103 @@ jobs:
       version_found: ${{ steps.check-version.outputs.valid }}
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Get full history for better commit messages
-
-      - name: Install Python yq
-        run: |
-          # Check if Python yq is installed, install if not
-          if ! command -v yq &> /dev/null || ! yq --help 2>&1 | grep -q "Python YAML processor"; then
-            echo "Installing Python yq..."
-            pip install yq
-          fi
-          yq --version
-          # Verify we're using the Python version
-          yq --help | grep -q "Python YAML processor" || { echo "Error: Wrong yq version installed. Please ensure Python yq is installed."; exit 1; }
-
-      - name: Check version exists in source
-        id: check-version
-        run: |
-          SOURCE_ENV="${{ inputs.source_env }}"
-          APP_NAME="${{ inputs.app_name }}"
-          GITOPS_FILE="${{ inputs.gitops_file }}"
-
-          # Check if gitops file exists
-          if [ ! -f "$GITOPS_FILE" ]; then
-            echo "Error: GitOps file $GITOPS_FILE not found!"
-            exit 1
-          fi
-
-          # Extract source version
-          SOURCE_VERSION=$(yq -r ".apps[] | select(.env == \"$SOURCE_ENV\" and .name == \"$APP_NAME\") | .revision" $GITOPS_FILE)
-          echo "Current version in $SOURCE_ENV: $SOURCE_VERSION"
-          TARGET_VERSION="${{ inputs.version }}"
-
-          # Check if application exists in source environment
-          if [ -z "$SOURCE_VERSION" ]; then
-            echo "Error: Application $APP_NAME not found in $SOURCE_ENV environment"
-            echo "valid=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-          # Check if target version matches source version
-          if [ "$SOURCE_VERSION" = "$TARGET_VERSION" ]; then
-            echo "✅ Version $TARGET_VERSION found in ${{ inputs.source_env }} for $APP_NAME"
-            echo "valid=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Error: Version mismatch!"
-            echo "Expected version: $TARGET_VERSION"
-            echo "Found version: $SOURCE_VERSION"
-            echo "valid=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-          # Check if version already exists in target environment
-          TARGET_ENV="${{ inputs.target_env }}"
-          CURRENT_TARGET_VERSION=$(yq -r ".apps[] | select(.env == \"$TARGET_ENV\" and .name == \"$APP_NAME\") | .revision" $GITOPS_FILE)
-
-          if [ -n "$CURRENT_TARGET_VERSION" ] && [ "$CURRENT_TARGET_VERSION" = "$TARGET_VERSION" ]; then
-            echo "⚠️ Warning: Version $TARGET_VERSION already exists in $TARGET_ENV for $APP_NAME"
-            echo "target_already_updated=true" >> $GITHUB_OUTPUT
-          else
-            echo "target_already_updated=false" >> $GITHUB_OUTPUT
-          fi
-
       - uses: actions/create-github-app-token@v1
         id: generate-token
         with:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.private_key}}
 
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          ref: ${{ github.event.repository.default_branch }}
 
-      - name: Create and push changes
+      - name: Install Python yq
+        run: |
+          # Check if Python yq is installed, install if not
+          if ! command -v yq &> /dev/null || ! yq --help 2>&1 | grep -q "https://github.com/kislyuk/yq"; then
+            echo "Installing Python yq..."
+            pip install yq
+          fi
+          yq --version
+          # Verify we're using the Python version
+          yq --help | grep -q "https://github.com/kislyuk/yq" || { echo "Error: Wrong yq version installed. Please ensure Python yq is installed."; exit 1; }
+
+      - name: Check version exists and current state
+        id: check-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APP_NAME="${{ inputs.app_name }}"
+          TARGET_VERSION="${{ inputs.version }}"
+          IFS=',' read -ra TARGET_ENVS <<< "${{ inputs.target_envs }}"
+
+          # Fetch releases using GraphQL
+          RELEASES=$(gh api graphql -f query='
+            query($name: String!, $owner: String!) {
+              repository(owner: $owner, name: $name) {
+                releases(first: 100) {
+                  nodes { tagName }
+                }
+              }
+            }' -F owner="${GITHUB_REPOSITORY_OWNER}" -F name="${GITHUB_REPOSITORY#*/}" --jq '.data.repository.releases.nodes[].tagName')
+
+          if [ -z "$RELEASES" ]; then
+            echo "❌ Error: No releases found in repository"
+            echo "valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Check if version exists in releases
+          if echo "$RELEASES" | grep -q "^${TARGET_VERSION}$"; then
+            echo "✅ Version $TARGET_VERSION found in releases for $APP_NAME"
+            echo "valid=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Error: Version not found in releases!"
+            echo "Expected version: $TARGET_VERSION"
+            echo "Available versions:"
+            echo "$RELEASES" | head -n 5
+            echo "valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Check current state in each target environment
+          GITOPS_FILE="${{ inputs.gitops_file }}"
+          if [ ! -f "$GITOPS_FILE" ]; then
+            echo "Error: GitOps file $GITOPS_FILE not found!"
+            exit 1
+          fi
+
+          ALL_UPDATED=true
+          UPDATED_ENVS=""
+          for ENV in "${TARGET_ENVS[@]}"; do
+            CURRENT_VERSION=$(yq -r ".apps[] | select(.env == \"$ENV\" and .name == \"$APP_NAME\") | .revision" $GITOPS_FILE)
+
+            if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$TARGET_VERSION" ]; then
+              echo "⚠️ Warning: Version $TARGET_VERSION already exists in $ENV for $APP_NAME"
+              [ -n "$UPDATED_ENVS" ] && UPDATED_ENVS="${UPDATED_ENVS},"
+              UPDATED_ENVS="${UPDATED_ENVS}${ENV}"
+            else
+              ALL_UPDATED=false
+            fi
+          done
+
+          if [ "$ALL_UPDATED" = true ]; then
+            echo "target_already_updated=true" >> $GITHUB_OUTPUT
+            echo "updated_envs=$UPDATED_ENVS" >> $GITHUB_OUTPUT
+          else
+            echo "target_already_updated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get GitHub App User ID
+        id: get-user-id
+        run: echo "user-id=$(gh api "/users/${{ steps.generate-token.outputs.app-slug }}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
+        env:
+            GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+
+      - name: Create and push changes (PR)
         id: create-pr
+        if: inputs.promote_type == 'pull_request'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           MERGE_TYPE: ${{ inputs.merge_type }}
@@ -173,8 +191,13 @@ jobs:
 
           # Set up branch name and PR details
           APP_NAME="${{ inputs.app_name }}"
-          BRANCH_NAME="promote-${APP_NAME}-${{ inputs.version }}-to-${{ inputs.target_env }}"
-          PR_TITLE="chore($APP_NAME): promote version ${{ inputs.version }} to ${{ inputs.target_env }}"
+          TARGET_VERSION="${{ inputs.version }}"
+          IFS=',' read -ra TARGET_ENVS <<< "${{ inputs.target_envs }}"
+
+          # Create environment string for branch name (e.g., "dev-stg-prod")
+          ENV_STRING=$(echo "${{ inputs.target_envs }}" | tr ',' '-')
+          BRANCH_NAME="promote-${APP_NAME}-${TARGET_VERSION}-to-${ENV_STRING}"
+          PR_TITLE="chore($APP_NAME): promote version ${TARGET_VERSION} to ${ENV_STRING}"
 
           # Check if branch already exists
           if git ls-remote --heads origin refs/heads/$BRANCH_NAME | grep -q $BRANCH_NAME; then
@@ -195,23 +218,25 @@ jobs:
             echo "branch_exists=false" >> $GITHUB_OUTPUT
           fi
 
+          # Configure Git user
+          git config --global user.name '${{ steps.generate-token.outputs.app-slug }}[bot]'
+          git config --global user.email '${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}[bot]@users.noreply.github.com'
+
           # Create and switch to new branch
           git checkout -b "$BRANCH_NAME"
-
-          # Update the GitOps file
-          TARGET_ENV="${{ inputs.target_env }}"
-          TARGET_VERSION="${{ inputs.version }}"
 
           # Make a backup of the file before modification
           cp ${{ inputs.gitops_file }} ${{ inputs.gitops_file }}.bak
 
-          # Update the GitOps file
-          yq -y --in-place ".apps |= map(if .env == \"$TARGET_ENV\" and .name == \"$APP_NAME\" then .revision = \"$TARGET_VERSION\" else . end)" \
-            ${{ inputs.gitops_file }}
+          # Update the GitOps file for each environment
+          for ENV in "${TARGET_ENVS[@]}"; do
+            yq -y --in-place ".apps |= map(if .env == \"$ENV\" and .name == \"$APP_NAME\" then .revision = \"$TARGET_VERSION\" else . end)" \
+              ${{ inputs.gitops_file }}
+          done
 
           # Check if file was changed
           if cmp -s ${{ inputs.gitops_file }} ${{ inputs.gitops_file }}.bak; then
-            echo "❌ Error: Failed to update GitOps file. Application $APP_NAME might not exist in $TARGET_ENV environment."
+            echo "❌ Error: Failed to update GitOps file. Application $APP_NAME might not exist in specified environments."
             rm ${{ inputs.gitops_file }}.bak
             exit 1
           fi
@@ -223,29 +248,38 @@ jobs:
           git commit -m "$PR_TITLE"
           git push origin "$BRANCH_NAME"
 
-          # Create labels if they don't exist
+          # Create standard labels
           gh label create "promotion" --color "0E8A16" --description "Pull requests for promotions" || true
-          gh label create "env/${{ inputs.source_env }}-to-${{ inputs.target_env }}" --color "FBCA04" \
-            --description "Pull requests for promotions from ${{ inputs.source_env }} to ${{ inputs.target_env }}" || true
-          gh label create "version/${{ inputs.version }}" --color "1D76DB" \
-            --description "Pull requests for promotions of version ${{ inputs.version }}" || true
-          gh label create "app/$APP_NAME" --color "5319E7" \
-            --description "Pull requests for $APP_NAME" || true
+          gh label create "app/$APP_NAME" --color "5319E7" --description "Pull requests for $APP_NAME" || true
+          gh label create "version/$TARGET_VERSION" --color "1D76DB" --description "Pull requests for $APP_NAME" || true
 
-          # Prepare PR creation command
-          PR_CMD="gh pr create --title \"$PR_TITLE\" --body \"Promoting $APP_NAME version ${{ inputs.version }} from ${{ inputs.source_env }} to ${{ inputs.target_env }}
+          # Create environment-specific labels
+          for ENV in "${TARGET_ENVS[@]}"; do
+            gh label create "env/$TARGET_VERSION-to-$ENV" --color "FBCA04" \
+              --description "Pull requests for promotions from $TARGET_VERSION to $ENV" || true
+          done
+
+          # Build PR body
+          PR_BODY="Promoting $APP_NAME version $TARGET_VERSION to multiple environments
 
           ## Promotion Details
           - Application: $APP_NAME
-          - Source: ${{ inputs.source_env }}
-          - Target: ${{ inputs.target_env }}
-          - Version: ${{ inputs.version }}
+          - Version: $TARGET_VERSION
+          - Target Environments:
+          $(for ENV in "${TARGET_ENVS[@]}"; do echo "  - $ENV"; done)
 
-          This PR was automatically generated by the promotion workflow.\" \
+          This PR was automatically generated by the promotion workflow."
+
+          # Prepare PR creation command with labels
+          PR_CMD="gh pr create --title \"$PR_TITLE\" --body \"$PR_BODY\" \
           --label \"promotion\" \
-          --label \"env/${{ inputs.source_env }}-to-${{ inputs.target_env }}\" \
-          --label \"version/${{ inputs.version }}\" \
+          --label \"version/$TARGET_VERSION\" \
           --label \"app/$APP_NAME\""
+
+          # Add environment-specific labels
+          for ENV in "${TARGET_ENVS[@]}"; do
+            PR_CMD="$PR_CMD --label \"env/$TARGET_VERSION-to-$ENV\""
+          done
 
           # Add draft option if requested
           if [ "${{ inputs.create_pr_draft }}" == "true" ]; then
@@ -259,18 +293,90 @@ jobs:
 
           # Create PR and capture outputs
           PR_URL=$(eval $PR_CMD)
-
           PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]*$')
           echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "url=$PR_URL" >> $GITHUB_OUTPUT
 
-      - name: Print PR URL
+      - name: Direct push to default branch
+        id: direct-push
+        if: |
+          inputs.promote_type == 'direct_push' && 
+          inputs.enable_auto_deploy == true
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          echo "Created PR: ${{ steps.create-pr.outputs.url }}"
+          if [[ "${{ inputs.enable_auto_deploy }}" != "true" ]]; then
+            echo "❌ Error: direct_push requires enable_auto_deploy=true"
+            exit 1
+          fi
 
-  auto-deploy:
+          # Configure Git user
+          git config --global user.name '${{ steps.generate-token.outputs.app-slug }}[bot]'
+          git config --global user.email '${{ steps.get-user-id.outputs.user-id }}+${{ steps.generate-token.outputs.app-slug }}[bot]@users.noreply.github.com'
+
+          # Set up commit details
+          APP_NAME="${{ inputs.app_name }}"
+          TARGET_VERSION="${{ inputs.version }}"
+          IFS=',' read -ra TARGET_ENVS <<< "${{ inputs.target_envs }}"
+          ENV_STRING=$(echo "${{ inputs.target_envs }}" | tr ',' '-')
+          COMMIT_MSG="chore($APP_NAME): promote version ${TARGET_VERSION} to ${ENV_STRING}"
+
+          # Make a backup of the file before modification
+          cp ${{ inputs.gitops_file }} ${{ inputs.gitops_file }}.bak
+
+          # Update the GitOps file for each environment
+          for ENV in "${TARGET_ENVS[@]}"; do
+            yq -y --in-place ".apps |= map(if .env == \"$ENV\" and .name == \"$APP_NAME\" then .revision = \"$TARGET_VERSION\" else . end)" \
+              ${{ inputs.gitops_file }}
+          done
+
+          # Check if file was changed
+          if cmp -s ${{ inputs.gitops_file }} ${{ inputs.gitops_file }}.bak; then
+            echo "❌ Error: Failed to update GitOps file. Application $APP_NAME might not exist in specified environments."
+            rm ${{ inputs.gitops_file }}.bak
+            exit 1
+          fi
+
+          rm ${{ inputs.gitops_file }}.bak
+
+          # Commit and push changes directly to default branch
+          git add ${{ inputs.gitops_file }}
+          git commit -m "$COMMIT_MSG"
+
+          # Push changes, with retry logic
+          max_attempts=3
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            if git push origin HEAD:${{ github.event.repository.default_branch }}; then
+              echo "✅ Successfully pushed changes to default branch"
+              break
+            fi
+            echo "Attempt $attempt failed. Retrying..."
+            git pull --rebase origin ${{ github.event.repository.default_branch }}
+            attempt=$((attempt + 1))
+          done
+
+          if [ $attempt -gt $max_attempts ]; then
+            echo "❌ Failed to push changes after $max_attempts attempts"
+            exit 1
+          fi
+
+          echo "promotion_type=direct_push" >> $GITHUB_OUTPUT
+          echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Log promotion details
+        run: |
+          if [[ "${{ inputs.promote_type }}" == "direct_push" ]]; then
+            echo "Direct push completed for ${{ inputs.app_name }} version ${{ inputs.version }}"
+            echo "Commit SHA: ${{ steps.direct-push.outputs.commit_sha }}"
+          else
+            echo "Pull request created: ${{ steps.create-pr.outputs.url }}"
+          fi
+
+  pr-based-auto-deploy:
     needs: promote
     if: |
+      inputs.promote_type == 'pull_request' &&
       inputs.enable_auto_deploy == true &&
       needs.promote.outputs.version_found == 'true'
     runs-on: ${{ inputs.runs_on }}
@@ -278,25 +384,16 @@ jobs:
       pull-requests: write
       contents: write
     steps:
-      - name: Check if auto-deploy is enabled for environment
-        id: check-auto-deploy
+      - name: Auto-approve and merge PR
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          IFS=',' read -ra AUTO_DEPLOY_ENVS <<< "${{ inputs.auto_deploy_environments }}"
-          for env in "${AUTO_DEPLOY_ENVS[@]}"; do
-            if [ "${env// /}" = "${{ inputs.target_env }}" ]; then
-              echo "enabled=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          done
-          echo "enabled=false" >> $GITHUB_OUTPUT
+          IFS=',' read -ra TARGET_ENVS <<< "${{ inputs.target_envs }}"
+          ENV_STRING=$(IFS=, ; echo "${TARGET_ENVS[*]}")
 
-      - name: Auto-approve PR
-        if: steps.check-auto-deploy.outputs.enabled == 'true'
-        run: |
-          echo "Auto-approving PR #${{ needs.promote.outputs.pr_number }} for ${{ inputs.target_env }} environment"
-          gh pr review ${{ needs.promote.outputs.pr_number }} --repo ${{ github.repository }} --approve -b "Auto-approving ${{ inputs.target_env }} promotion for ${{ inputs.app_name }}"
+          echo "Auto-approving PR #${{ needs.promote.outputs.pr_number }} for environments: $ENV_STRING"
+          gh pr review ${{ needs.promote.outputs.pr_number }} --repo ${{ github.repository }} \
+            --approve -b "Auto-approving promotion for ${{ inputs.app_name }} to environments: $ENV_STRING"
 
           echo "Setting PR to auto-merge with ${{inputs.merge_type}} strategy"
           gh pr merge ${{ needs.promote.outputs.pr_number }} --auto --repo ${{ github.repository }} --${{inputs.merge_type}}
-        env:
-          GH_TOKEN: ${{ github.token }}

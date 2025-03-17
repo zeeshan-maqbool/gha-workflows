@@ -1,5 +1,5 @@
 name: 'PR Environment'
-description: 'Creates a comment with a link to a preview environment for pull requests'
+description: 'Creates a comment with a link to a preview environment for pull requests and labels the PR to trigger ArgoCD deployment'
 
 inputs:
   URL_TEMPLATE:
@@ -7,33 +7,55 @@ inputs:
     required: false
     default: 'https://buildkite-node-app-${PR_NUMBER}.dev.devops.2u.com'
   COMMENT_PREFIX:
-    description: 'Prefix text for the comment'
+    description: 'Prefix text for the comment to identify and update existing comments'
     required: false
     default: 'Preview environment will be available @'
   ADD_PREVIEW_LABEL:
-    description: 'Whether to add a preview label to the PR'
+    description: 'Whether to add a preview label to the PR to trigger ArgoCD deployment'
     required: false
     default: 'true'
   LABEL_NAME:
-    description: 'Name of the label to add to the PR'
+    description: 'Name of the label to add to the PR (used for ArgoCD triggers)'
     required: false
     default: 'preview'
+  SKIP_BRANCHES:
+    description: 'Comma-separated list of branch prefixes to skip preview environments for'
+    required: false
+    default: 'promote-,release-please'
+
+outputs:
+  preview_url:
+    description: 'The generated preview environment URL'
+    value: ${{ steps.generate-preview.outputs.preview_url }}
+  label_added:
+    description: 'Whether the preview label was added (true) or skipped (false)'
+    value: ${{ steps.generate-preview.outputs.label_added }}
 
 runs:
   using: "composite"
   steps:
     - name: Create PR Environment Comment
+      id: generate-preview
       uses: actions/github-script@v6
       with:
         script: |
+          const fs = require('fs');
+          const path = process.env.GITHUB_OUTPUT;
+
           // Skip for certain branch patterns
           const branchName = context.payload.pull_request.head.ref;
-          if (branchName.startsWith('promote-') || branchName.startsWith('release-please')) {
+          const skipPatterns = '${{ inputs.SKIP_BRANCHES }}'.split(',').filter(Boolean);
+
+          const shouldSkip = skipPatterns.some(pattern => branchName.startsWith(pattern));
+          if (shouldSkip) {
             console.log('Skipping PR environment for branch:', branchName);
+            fs.appendFileSync(path, `preview_url=\n`);
+            fs.appendFileSync(path, `label_added=false\n`);
             return;
           }
-          
+
           // Add label if configured
+          let labelAdded = false;
           if ('${{ inputs.ADD_PREVIEW_LABEL }}' === 'true') {
             try {
               await github.rest.issues.addLabels({
@@ -42,6 +64,7 @@ runs:
                 labels: ['${{ inputs.LABEL_NAME }}']
               });
               console.log('Added label: ${{ inputs.LABEL_NAME }}');
+              labelAdded = true;
             } catch (error) {
               console.log('Error adding label:', error.message);
             }
@@ -51,10 +74,10 @@ runs:
           const urlTemplate = '${{ inputs.URL_TEMPLATE }}';
           const previewUrl = urlTemplate.replace('${PR_NUMBER}', context.issue.number);
           console.log('Preview URL:', previewUrl);
-          
+
           const commentPrefix = '${{ inputs.COMMENT_PREFIX }}';
           const commentText = `${commentPrefix} ${previewUrl}`;
-          
+
           // Search phrase to find existing comments
           const searchPhrase = commentPrefix;
 
@@ -87,3 +110,7 @@ runs:
             });
             console.log('Created new preview environment comment');
           }
+
+          // Set outputs
+          fs.appendFileSync(path, `preview_url=${previewUrl}\n`);
+          fs.appendFileSync(path, `label_added=${labelAdded}\n`);

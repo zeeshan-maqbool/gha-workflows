@@ -1,0 +1,117 @@
+name: 'Check Changes'
+description: 'Detects changes in specified source directories for monorepo apps. Supports both JSON and YAML config files'
+
+inputs:
+  config-file:
+    description: 'Path to configuration file (defaults to gitops.yaml)'
+    required: false
+    default: 'gitops.yaml'
+  jq-pattern:
+    description: 'Pattern to extract package paths. For gitops.yaml: ".apps[].repoPath | split(\"/helm\")[0] | if . == \"helm\" then \".\" else . end".'
+    required: false
+    default: '.apps[].repoPath | split("/helm")[0] | if . == "helm" then "." else . end'
+  base-sha:
+    description: 'Base Git SHA to compare changes against (defaults to PR base SHA)'
+    required: false
+    default: '${{ github.event.pull_request.base.sha }}'
+  head-sha:
+    description: 'Head Git SHA to detect changes (defaults to PR head SHA)'
+    required: false
+    default: '${{ github.event.pull_request.head.sha }}'
+
+outputs:
+  src_list:
+    description: 'JSON array of changed package paths/directory names'
+    value: ${{ steps.detect-changes.outputs.src_list}}
+  app_list:
+    description: 'JSON array of unique app names (only available when using gitops.yaml)'
+    value: ${{ steps.detect-changes.outputs.app_list}}
+  has_changes:
+    description: 'Boolean indicating if changes were detected in any monitored package'
+    value: ${{ steps.detect-changes.outputs.has_changes }}
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - uses: 2uinc/gha-workflows/.github/actions/install-yq@main
+
+    - name: Detect Changes
+      id: detect-changes
+      shell: bash
+      run: |
+        CHANGED_APPS=()
+        CHANGED_APP_NAMES=()
+
+        if [ ! -f "${{ inputs.config-file }}" ]; then
+          echo "Error: ${{ inputs.config-file }} not found"
+          exit 1
+        fi
+
+        # Determine the parser based on file extension
+        if [[ "${{ inputs.config-file }}" == *.json ]]; then
+          PARSER="jq"
+        elif [[ "${{ inputs.config-file }}" == *.yaml || "${{ inputs.config-file }}" == *.yml ]]; then
+          PARSER="yq"
+        else
+          echo "Error: Unsupported file format for ${{ inputs.config-file }}"
+          exit 1
+        fi
+
+        # Get package paths using the same query pattern
+        PACKAGES=$($PARSER -r '${{ inputs.jq-pattern }}' "${{ inputs.config-file }}" | sort -u)
+
+        for path in $PACKAGES; do
+          # Skip empty paths and "." root package
+          if [ -z "$path" ] || [ "$path" = "." ]; then
+            continue
+          fi
+
+          # Validate path exists
+          if [ ! -d "$path" ]; then
+            echo "Warning: Directory '$path' does not exist"
+            continue
+          fi
+
+          # Check for changes
+          CHANGES=$(git diff --name-only ${{ inputs.base-sha }} ${{ inputs.head-sha }} | grep -c "^$path/" || true)
+          if [ "$CHANGES" -gt "0" ]; then
+            CHANGED_APPS+=("$path")
+          fi
+        done
+
+        # Get app names for changed paths
+        if [ -n "${CHANGED_APPS[*]}" ]; then
+          for path in "${CHANGED_APPS[@]}"; do
+            # Get unique app names that match this repo path
+            APP_NAMES=$(yq -r ".apps[] | select(.repoPath | startswith(\"$path\")) | .name" gitops.yaml | sort -u)
+            echo "Found app names for $path: $APP_NAMES"
+            if [ -n "$APP_NAMES" ]; then
+              while IFS= read -r name; do
+                CHANGED_APP_NAMES+=("$name")
+              done <<< "$APP_NAMES"
+            fi
+          done
+
+          APP_JSON_ARRAY=$(printf '"%s",' "${CHANGED_APP_NAMES[@]}" | sed 's/,$//')
+          echo "App names: [$APP_JSON_ARRAY]"
+          echo "app_list=[$APP_JSON_ARRAY]" >> $GITHUB_OUTPUT
+        else
+          echo "No app names found for changed paths"
+          echo "app_list=[]" >> $GITHUB_OUTPUT
+        fi
+
+        # Create JSON array output for paths
+        JSON_ARRAY=$(printf '"%s",' "${CHANGED_APPS[@]}" | sed 's/,$//')
+        if [ -n "${CHANGED_APPS[*]}" ]; then
+          echo "JSON array: [$JSON_ARRAY]"
+          echo "src_list=[$JSON_ARRAY]" >> $GITHUB_OUTPUT
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        else
+          echo "No changes detected"
+          echo "src_list=[]" >> $GITHUB_OUTPUT
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        fi

@@ -1,0 +1,86 @@
+name: 'Determine Released App'
+description: 'Determines the app name from a Release-Please-Style GitHub release. Handles both root app releases (v1.0.0) and nested app releases (appname:v1.0.0) in monorepos.'
+
+inputs:
+  release-name:
+    description: 'Name of the GitHub release (e.g., "v1.0.0" or "appname:v1.0.0")'
+    required: true
+  gitops-file:
+    description: 'Path to gitops configuration file to validate app names against'
+    required: false
+    default: 'gitops.yaml'
+  root-app:
+    description: 'Override the default root/default app name (defaults to repository name)'
+    required: false
+    default: ''
+
+outputs:
+  app_name:
+    description: 'Name of the app determined from release'
+    value: ${{ steps.determine-app.outputs.app_name }}
+  release_type:
+    description: 'Type of release: "root" for main app or "component" for nested app'
+    value: ${{ steps.determine-app.outputs.release_type }}
+  version:
+    description: 'Extracted version from the release name'
+    value: ${{ steps.determine-app.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: 2uinc/gha-workflows/.github/actions/install-yq@main
+
+    - name: Determine app name from Github release
+      id: determine-app
+      shell: bash
+      run: |
+        # Get root app name from input or fallback to repository name
+        if [ -n "${{ inputs.root-app }}" ]; then
+          ROOT_APP="${{ inputs.root-app }}"
+        else
+          ROOT_APP="${GITHUB_REPOSITORY#*/}"
+        fi
+
+        # Get unique app names from gitops.yaml
+        APPS=$(yq -r '.apps[].name' ${{ inputs.gitops-file }} | sort -u)
+
+        # Get the release name
+        RELEASE_NAME="${{ inputs.release-name }}"
+
+        # Check if release name contains a colon (component release)
+        if [[ "$RELEASE_NAME" == *":"* ]]; then
+          APP_NAME=$(echo "$RELEASE_NAME" | cut -d':' -f1 | xargs)
+          VERSION=$(echo "$RELEASE_NAME" | cut -d':' -f2 | xargs)
+
+          # Validate against available apps
+          VALID_APP=false
+          for app in $APPS; do
+            if [[ "$app" == "$APP_NAME" ]]; then
+              VALID_APP=true
+              break
+            fi
+          done
+
+          if [[ "$VALID_APP" == "true" ]]; then
+            echo "Found component app: $APP_NAME"
+            echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+            echo "release_type=component" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Invalid component app '$APP_NAME' specified in release name '$RELEASE_NAME'"
+            echo "::error::The app name must match one of the applications defined in ${{ inputs.gitops-file }}"
+            echo "Available apps:"
+            for app in $APPS; do
+              echo "  - $app"
+            done
+            exit 1
+          fi
+        else
+          # No colon means root app release
+          echo "No component specified, using root app: $ROOT_APP"
+          echo "app_name=$ROOT_APP" >> $GITHUB_OUTPUT
+          echo "release_type=root" >> $GITHUB_OUTPUT
+          VERSION="$RELEASE_NAME"
+        fi
+
+        # Output the version
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
