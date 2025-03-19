@@ -79,7 +79,7 @@ runs:
           const commentText = `${commentPrefix} ${previewUrl}`;
 
           // Search phrase to find existing comments
-          const searchPhrase = commentPrefix;
+          const searchPhrase = commentText;
 
           // Get existing comments first
           const comments = await github.rest.issues.listComments({

@@ -1,0 +1,105 @@
+name: Release-Please
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      config_file:
+        description: 'Path to the release-please-config.json file'
+        required: false
+        type: string
+        default: 'release-please-config.json'
+      manifest_file:
+        description: 'Path to the .release-please-manifest.json file'
+        required: false
+        type: string
+        default: '.release-please-manifest.json'
+      release_branches:
+        description: 'Comma-separated list of branches that trigger the release workflow'
+        required: false
+        type: string
+        default: 'master,main'
+      gitops_paths_ignore:
+        description: 'Paths to ignore when triggering the release workflow'
+        required: false
+        type: string
+        default: 'gitops.yaml'
+      app_id:
+        description: 'GitHub App ID for token generation'
+        required: true
+        type: string
+    secrets:
+      private_key:
+        description: 'GitHub App private key for token generation'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  get-packages:
+    runs-on: ${{ inputs.runs_on }}
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get package paths
+        id: set-matrix
+        run: |
+          PACKAGES=$(jq -r '.packages | keys | tostring' ${{ inputs.config_file }})
+          echo "matrix=${PACKAGES}" >> $GITHUB_OUTPUT
+
+  github-release:
+    runs-on: ${{ inputs.runs_on }}
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: generate-token
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.private_key }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Create GitHub Release
+        run: |
+          npx release-please github-release \
+            --token=${{ steps.generate-token.outputs.token }} \
+            --repo-url=${{ github.repository }} \
+            --config-file=${{ inputs.config_file }} \
+            --manifest-file=${{ inputs.manifest_file }}
+
+  release-pr:
+    needs: [get-packages, github-release]
+    runs-on: ${{ inputs.runs_on }}
+    strategy:
+      matrix:
+        package: ${{ fromJson(needs.get-packages.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/create-github-app-token@v1
+        id: generate-token
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.private_key }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Create/Update Release PR
+        run: |
+          npx release-please release-pr \
+            --token=${{ steps.generate-token.outputs.token }} \
+            --repo-url=${{ github.repository }} \
+            --config-file=${{ inputs.config_file }} \
+            --manifest-file=${{ inputs.manifest_file }} \
+            --path=${{ matrix.package }}
