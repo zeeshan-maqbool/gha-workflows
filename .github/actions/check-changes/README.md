@@ -74,7 +74,7 @@ jobs:
           
       - name: Determine changed sources
         id: check
-        uses: 2uinc/gha-workflows/.github/actions/check-changes@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/check-changes@main
 
   build-and-push:
     needs: check-changes
@@ -96,7 +96,7 @@ If you want to use a different configuration file:
 ```yaml
 - name: Determine changed sources
   id: check
-  uses: 2uinc/gha-workflows/.github/actions/check-changes@main
+  uses: zeeshan-maqbool/gha-workflows/.github/actions/check-changes@main
   with:
     config-file: 'my-config.json'
     jq-pattern: '.components | keys[]'

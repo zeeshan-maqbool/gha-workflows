@@ -67,7 +67,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure AWS Credentials
-        uses: 2uinc/gha-workflows/.github/actions/assume_repo_role@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/assume_repo_role@main
         with:
           AWS_REGION: 'us-west-2'
           AWS_ACCOUNT_NAME: 'my-aws-account'

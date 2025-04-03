@@ -134,7 +134,7 @@ on:
 
 jobs:
   release:
-    uses: 2uinc/gha-workflows/.github/workflows/release.yml@main
+    uses: zeeshan-maqbool/gha-workflows/.github/workflows/release.yml@main
     with:
       app_id: ${{ vars.RELEASE_APP_ID }}
     secrets:
@@ -156,7 +156,7 @@ on:
 
 jobs:
   release:
-    uses: 2uinc/gha-workflows/.github/workflows/release.yml@main
+    uses: zeeshan-maqbool/gha-workflows/.github/workflows/release.yml@main
     with:
       runs_on: 2uinc-mgmt
       config_file: 'config/release-please-config.json'

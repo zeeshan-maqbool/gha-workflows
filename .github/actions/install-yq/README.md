@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Install yq
-        uses: 2uinc/gha-workflows/.github/actions/install-yq@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/install-yq@main
       
       - name: Use yq to process YAML
         run: |
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Install specific yq version
-        uses: 2uinc/gha-workflows/.github/actions/install-yq@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/install-yq@main
         with:
           version: '3.0.2'
       

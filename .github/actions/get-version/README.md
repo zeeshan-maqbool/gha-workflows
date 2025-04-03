@@ -67,7 +67,7 @@ jobs:
         
       - name: Get version
         id: version
-        uses: 2uinc/gha-workflows/.github/actions/get-version@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/get-version@main
       
       - name: Build and tag Docker image
         uses: docker/build-push-action@v5
@@ -87,7 +87,7 @@ jobs:
         
       - name: Get version
         id: version
-        uses: 2uinc/gha-workflows/.github/actions/get-version@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/get-version@main
         with:
           release_label: 'release-pr'
           prefix: 'dev-'

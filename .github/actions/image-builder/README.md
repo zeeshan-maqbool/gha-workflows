@@ -86,7 +86,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build and Push Docker Image
-        uses: 2uinc/gha-workflows/.github/actions/image-builder@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/image-builder@main
         with:
           RUNS_ON: ubuntu-latest
           AWS_REGION: us-west-2
@@ -111,7 +111,7 @@ jobs:
           submodules: recursive
 
       - name: Build and Push Multi-Architecture Image
-        uses: 2uinc/gha-workflows/.github/actions/image-builder@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/image-builder@main
         with:
           RUNS_ON: ubuntu-latest
           AWS_REGION: us-west-2
@@ -136,7 +136,7 @@ jobs:
       contents: read
     steps:
       - name: Build Image with Private Repos
-        uses: 2uinc/gha-workflows/.github/actions/image-builder@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/image-builder@main
         with:
           RUNS_ON: ubuntu-latest
           AWS_REGION: us-west-2

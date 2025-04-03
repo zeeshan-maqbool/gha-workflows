@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Validate Helm Chart Environments
-        uses: 2uinc/gha-workflows/.github/actions/validate_helm@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/validate_helm@main
         with:
           REPO_PATH: "helm"
 ```
@@ -121,7 +121,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Validate Helm Chart Environments
-        uses: 2uinc/gha-workflows/.github/actions/validate_helm@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/validate_helm@main
         with:
           REPO_PATH: "helm"
           GH_APP_ID: ${{ vars.GITOPS_BOT_APP_ID }}
@@ -138,7 +138,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Validate Helm for Staging Only
-        uses: 2uinc/gha-workflows/.github/actions/validate_helm@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/validate_helm@main
         with:
           REPO_PATH: "helm"
           ENV: "stg"
@@ -155,7 +155,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Validate Helm Chart Environments
-        uses: 2uinc/gha-workflows/.github/actions/validate_helm@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/validate_helm@main
         with:
           REPO_PATH: "helm"
           GITOPS_FILE: "deployment/gitops.yaml"
@@ -168,6 +168,6 @@ jobs:
 
 ## Dependencies
 
-- [2uinc/gha-workflows/.github/actions/install-yq@main](https://github.com/2uinc/gha-workflows/tree/main/.github/actions/install-yq) - For YAML parsing
+- [zeeshan-maqbool/gha-workflows/.github/actions/install-yq@main](https://github.com/2uinc/gha-workflows/tree/main/.github/actions/install-yq) - For YAML parsing
 - [actions/create-github-app-token@v1](https://github.com/actions/create-github-app-token) - For GitHub App token generation (private dependencies only)
 - Helm CLI must be installed on the runner

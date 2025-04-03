@@ -81,7 +81,7 @@ jobs:
       
       - name: Determine released app
         id: app-info
-        uses: 2uinc/gha-workflows/.github/actions/determine-app-released@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/determine-app-released@main
         with:
           release-name: ${{ github.event.release.name }}
       
@@ -103,7 +103,7 @@ jobs:
       
       - name: Determine released app
         id: app-info
-        uses: 2uinc/gha-workflows/.github/actions/determine-app-released@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/determine-app-released@main
         with:
           release-name: ${{ github.event.release.name }}
           gitops-file: 'deploy/gitops.yaml'
@@ -124,5 +124,5 @@ No special permissions required. The action only processes local files.
 
 ## Dependencies
 
-- [2uinc/gha-workflows/.github/actions/install-yq@main](https://github.com/2uinc/gha-workflows/tree/main/.github/actions/install-yq) - For YAML parsing
+- [zeeshan-maqbool/gha-workflows/.github/actions/install-yq@main](https://github.com/2uinc/gha-workflows/tree/main/.github/actions/install-yq) - For YAML parsing
 - Python yq must be installed on the runner

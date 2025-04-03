@@ -47,7 +47,7 @@ runs:
   using: "composite"
   steps:
     - name: Install yq
-      uses: 2uinc/gha-workflows/.github/actions/install-yq@main
+      uses: zeeshan-maqbool/gha-workflows/.github/actions/install-yq@main
 
     - name: Determine APP_NAME
       id: determine-app

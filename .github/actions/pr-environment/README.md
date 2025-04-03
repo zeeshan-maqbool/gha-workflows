@@ -68,7 +68,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Create Preview Environment
-        uses: 2uinc/gha-workflows/.github/actions/pr_environment@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/pr_environment@main
 ```
 
 ## Custom URL Example
@@ -81,7 +81,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Create Preview Environment
-        uses: 2uinc/gha-workflows/.github/actions/pr_environment@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/pr_environment@main
         with:
           URL_TEMPLATE: 'https://my-app-${PR_NUMBER}.staging.example.com'
           COMMENT_PREFIX: '🚀 Preview deployment available at:'
@@ -98,7 +98,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Create Preview Environment
-        uses: 2uinc/gha-workflows/.github/actions/pr_environment@main
+        uses: zeeshan-maqbool/gha-workflows/.github/actions/pr_environment@main
         with:
           SKIP_BRANCHES: 'promote-,release-please,dependabot/'
 ```
